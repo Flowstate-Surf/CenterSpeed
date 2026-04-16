@@ -47,9 +47,9 @@ public sealed class CenterSpeed : BasePlugin
 
     private sealed class PlayerHudSettings
     {
-        public float[] DigitOffsets { get; set; } = { 1.0f, 2.0f, 3.0f, 4.0f };
+        public float[] DigitOffsets { get; set; } = { -1.5f, -0.5f, 0.5f, 1.5f };
         public float   HudScale     { get; set; } = 0.04f;
-        public float   YOffset      { get; set; } = -1f;
+        public float   YOffset      { get; set; } = 0f;
         public bool    Enabled      { get; set; } = false;
     }
 
@@ -185,7 +185,8 @@ public sealed class CenterSpeed : BasePlugin
 
         Core.Logger.LogWarning("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
             id, player.Controller?.TeamNum);
-        SpawnPlayerHud(player);
+        // Defer by one world update so the engine has time to assign the player's team.
+        Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
         return HookResult.Continue;
     }
 
@@ -316,6 +317,26 @@ public sealed class CenterSpeed : BasePlugin
                 player.SendChat(" [HUD] Subcommands: offset <1-4> <-10..10> | scale <0-10> | yoffset <-10..10> | toggle | info");
                 break;
         }
+    }
+
+    [Command("cs")]
+    public void OnCsCommand(ICommandContext context)
+    {
+        if (context.Sender is not IPlayer player) return;
+
+        var id = player.PlayerID;
+        if (id < 0 || id >= 65) return;
+
+        var settings = _playerSettings[id] ??= new PlayerHudSettings();
+        settings.Enabled = !settings.Enabled;
+        SaveSettings(player.SteamID, settings);
+
+        if (settings.Enabled)
+            Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+        else
+            KillPlayerHud(id);
+
+        player.SendChat($" [HUD] Speedometer {(settings.Enabled ? "enabled" : "disabled")}");
     }
 
     // -------------------------------------------------------------------------
