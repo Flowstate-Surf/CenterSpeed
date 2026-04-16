@@ -1,4 +1,4 @@
-ï»¿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -18,6 +18,8 @@ using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Plugins;
 using SwiftlyS2.Shared.EntitySystem;
 using SwiftlyS2.Shared.SchemaDefinitions;
+using SwiftlyS2.Shared.Menus;
+using SwiftlyS2.Core.Menus.OptionsBase;
 
 namespace CenterSpeed;
 
@@ -79,7 +81,7 @@ public sealed class CenterSpeed : BasePlugin
         }
         catch
         {
-            // Convar already exists on hot reload â€” _particleConVar stays null,
+            // Convar already exists on hot reload — _particleConVar stays null,
             // all call sites fall back to the hardcoded default via ??.
         }
         Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
@@ -97,7 +99,7 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnPrecacheResource>]
     public void OnPrecacheResource(IOnPrecacheResourceEvent @event)
     {
-        // Always precache the configured particle â€” handles workshop-mounted assets too.
+        // Always precache the configured particle — handles workshop-mounted assets too.
         var particlePath = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
         Core.Logger.LogWarning("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
         @event.AddItem(particlePath);
@@ -128,7 +130,7 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnMapUnload>]
     public void OnMapUnload(IOnMapUnloadEvent @event)
     {
-        // Drop entity references â€” the engine has already cleaned them up.
+        // Drop entity references — the engine has already cleaned them up.
         for (var i = 0; i < 65; i++)
             _huds[i] = null;
     }
@@ -334,15 +336,137 @@ public sealed class CenterSpeed : BasePlugin
         if (id < 0 || id >= 65) return;
 
         var settings = _playerSettings[id] ??= new PlayerHudSettings();
-        settings.Enabled = !settings.Enabled;
-        SaveSettings(player.SteamID, settings);
+        OpenMainMenu(player, settings);
+    }
 
-        if (settings.Enabled)
+    // -------------------------------------------------------------------------
+    // Menu builders
+
+    private void OpenMainMenu(IPlayer player, PlayerHudSettings settings)
+    {
+        var builder = Core.MenusAPI.CreateBuilder();
+        builder.Design.SetMenuTitle("CenterSpeed HUD");
+        builder.SetPlayerFrozen(false);
+
+        // Toggle
+        var toggleBtn = new ButtonMenuOption($"Toggle: {(settings.Enabled ? "\x04ON" : "\x07OFF")}");
+        toggleBtn.Click += (_, _2) =>
+        {
+            settings.Enabled = !settings.Enabled;
+            SaveSettings(player.SteamID, settings);
+            if (settings.Enabled)
+                SpawnPlayerHud(player);
+            else
+                KillPlayerHud(player.PlayerID);
+            OpenMainMenu(player, settings);
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(toggleBtn);
+
+        // Size submenu
+        builder.AddOption(new SubmenuMenuOption("Size", () => BuildSizeMenu(player, settings)));
+
+        // Position submenu
+        builder.AddOption(new SubmenuMenuOption("Position", () => BuildPositionMenu(player, settings)));
+
+        Core.MenusAPI.OpenMenuForPlayer(player, builder.Build());
+    }
+
+    private IMenuAPI BuildSizeMenu(IPlayer player, PlayerHudSettings settings)
+    {
+        const float ScaleStep = 0.002f;
+
+        var builder = Core.MenusAPI.CreateBuilder();
+        builder.Design.SetMenuTitle($"Size  (scale: {settings.HudScale:F4})");
+        builder.SetPlayerFrozen(false);
+
+        var upBtn = new ButtonMenuOption("Scale Up");
+        upBtn.Click += (_, _2) =>
+        {
+            settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, 0.001f, 0.5f);
+            SaveSettings(player.SteamID, settings);
             SpawnPlayerHud(player);
-        else
-            KillPlayerHud(id);
+            Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(upBtn);
 
-        player.SendChat($" [HUD] Speedometer {(settings.Enabled ? "enabled" : "disabled")}");
+        var downBtn = new ButtonMenuOption("Scale Down");
+        downBtn.Click += (_, _2) =>
+        {
+            settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, 0.001f, 0.5f);
+            SaveSettings(player.SteamID, settings);
+            SpawnPlayerHud(player);
+            Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(downBtn);
+
+        var backBtn = new ButtonMenuOption("Back");
+        backBtn.Click += (_, _2) =>
+        {
+            OpenMainMenu(player, settings);
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(backBtn);
+
+        return builder.Build();
+    }
+
+    private IMenuAPI BuildPositionMenu(IPlayer player, PlayerHudSettings settings)
+    {
+        const float MoveStep  = 0.1f;
+        static float[] DefaultOffsets() => new[] { -1.5f, -0.5f, 0.5f, 1.5f };
+        const float DefaultY  = -1f;
+
+        var builder = Core.MenusAPI.CreateBuilder();
+        builder.Design.SetMenuTitle($"Position  (x:{settings.DigitOffsets[1]:F2}  y:{settings.YOffset:F2})");
+        builder.SetPlayerFrozen(false);
+
+        void AddMoveButton(string label, Action applyMove)
+        {
+            var btn = new ButtonMenuOption(label);
+            btn.Click += (_, _2) =>
+            {
+                applyMove();
+                SaveSettings(player.SteamID, settings);
+                SpawnPlayerHud(player);
+                Core.MenusAPI.OpenMenuForPlayer(player, BuildPositionMenu(player, settings));
+                return ValueTask.CompletedTask;
+            };
+            builder.AddOption(btn);
+        }
+
+        AddMoveButton("Left",  () =>
+        {
+            for (var i = 0; i < 4; i++)
+                settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] - MoveStep, -10f, 10f);
+        });
+
+        AddMoveButton("Right", () =>
+        {
+            for (var i = 0; i < 4; i++)
+                settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] + MoveStep, -10f, 10f);
+        });
+
+        AddMoveButton("Up",    () => settings.YOffset = Math.Clamp(settings.YOffset - MoveStep, -10f, 10f));
+        AddMoveButton("Down",  () => settings.YOffset = Math.Clamp(settings.YOffset + MoveStep, -10f, 10f));
+
+        AddMoveButton("Center", () =>
+        {
+            DefaultOffsets().CopyTo(settings.DigitOffsets, 0);
+            settings.YOffset = DefaultY;
+        });
+
+        var backBtn = new ButtonMenuOption("Back");
+        backBtn.Click += (_, _2) =>
+        {
+            OpenMainMenu(player, settings);
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(backBtn);
+
+        return builder.Build();
     }
 
     // -------------------------------------------------------------------------
@@ -360,7 +484,7 @@ public sealed class CenterSpeed : BasePlugin
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
         if (team < 2)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping â€” not on a playing team (team={Team})", team);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
             return;
         }
 
@@ -372,7 +496,7 @@ public sealed class CenterSpeed : BasePlugin
 
         if (!settings.Enabled)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} â€” use !hudsettings toggle to enable", id);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} — use !hudsettings toggle to enable", id);
             return;
         }
 
@@ -409,11 +533,11 @@ public sealed class CenterSpeed : BasePlugin
             // DataCP/DataCPValue does NOT reliably propagate to the client particle system.
             // CP33 (X/Y position offset) MUST be a ServerControlPoint.
             // We have 4 server CP slots total:
-            //   Slot 0 = CP17: (0, 1, 2) â†’ alpha=1, self-illum=2
-            //   Slot 1 = CP32: (frame, 0, 0) â†’ digit sprite frame
-            //   Slot 2 = CP34: (scale, 0, 0) â†’ sprite size
-            //   Slot 3 = CP33: (xOffset, yOffset, 0) â†’ screen position
-            // CP16 (color) is dropped â€” white is hardcoded in the particle.
+            //   Slot 0 = CP17: (0, 1, 2) ? alpha=1, self-illum=2
+            //   Slot 1 = CP32: (frame, 0, 0) ? digit sprite frame
+            //   Slot 2 = CP34: (scale, 0, 0) ? sprite size
+            //   Slot 3 = CP33: (xOffset, yOffset, 0) ? screen position
+            // CP16 (color) is dropped — white is hardcoded in the particle.
             bool r17 = SetControlPointValue(particle, 17, new Vector(0f, 1f, 2f));
             bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
             bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
@@ -547,9 +671,9 @@ public sealed class CenterSpeed : BasePlugin
             }
         }
 
-        // Warn if GetAllPlayers returned nobody â€” that means transmit was never set.
+        // Warn if GetAllPlayers returned nobody — that means transmit was never set.
         if (playerCount == 0)
-            Core.Logger.LogWarning("[CenterSpeed][Transmit] WARNING: GetAllPlayers() returned 0 players â€” transmit not applied for ownerSlot={Owner}", ownerSlot);
+            Core.Logger.LogWarning("[CenterSpeed][Transmit] WARNING: GetAllPlayers() returned 0 players — transmit not applied for ownerSlot={Owner}", ownerSlot);
     }
 
     // -------------------------------------------------------------------------
@@ -571,7 +695,7 @@ public sealed class CenterSpeed : BasePlugin
         {
             var assignment = particle.ServerControlPointAssignments[i];
             // 255 = unassigned sentinel in CS2 particle schema.
-            // Also accept 0 as free if the CP index we want isn't 0 â€” some runtime defaults fill with 0.
+            // Also accept 0 as free if the CP index we want isn't 0 — some runtime defaults fill with 0.
             bool isFree = assignment == 255 || (assignment == 0 && cpIndex != 0);
             if (assignment == cpIndex || isFree)
             {
@@ -650,3 +774,4 @@ public sealed class CenterSpeed : BasePlugin
         }
     }
 }
+
