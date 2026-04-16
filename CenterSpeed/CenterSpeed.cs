@@ -248,15 +248,9 @@ public sealed class CenterSpeed : BasePlugin
 
         if (@event.UserIdPlayer is not { } player) return HookResult.Continue;
 
-        var id   = player.PlayerID;
-        var team = @event.Team;
+        var id = player.PlayerID;
 
-        // Only kill when going to spectator/unassigned (team < 2).
-        // When joining a playing team, OnPlayerSpawn fires next and
-        // SpawnPlayerHud already calls KillPlayerHud at the top —
-        // killing here too would schedule a deferred Kill that fires
-        // after SpawnPlayerHud creates new particles and hits them instead.
-        if (id >= 0 && id < 65 && team < 2)
+        if (id >= 0 && id < 65)
             KillPlayerHud(id);
 
         return HookResult.Continue;
@@ -604,9 +598,8 @@ public sealed class CenterSpeed : BasePlugin
         var team = player.Controller?.TeamNum ?? 0;
         LogDebug("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
 
-        // Always kill any existing HUD first — synchronous Despawn so the
-        // deferred Kill from KillPlayerHud can't fire on freshly spawned particles.
-        DespawnPlayerHud(id);
+        // Always kill any existing HUD first before spawning new particles.
+        KillPlayerHud(id);
 
         if (team < 2)
         {
@@ -709,26 +702,6 @@ public sealed class CenterSpeed : BasePlugin
                 particle.SetTransmitState(false, p.PlayerID);
             }
             particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
-        }
-    }
-
-    /// <summary>
-    /// Synchronously removes particles via Despawn. Used by SpawnPlayerHud before
-    /// creating new particles so a deferred Kill can't fire on the new entity slots.
-    /// </summary>
-    private void DespawnPlayerHud(int slot)
-    {
-        var state = _huds[slot];
-        if (state == null) return;
-
-        state.IsDisposed = true;
-        _huds[slot]      = null;
-        _lastSpeed[slot] = 0;
-
-        foreach (var particle in state.Digits)
-        {
-            if (particle == null || !particle.IsValidEntity) continue;
-            particle.Despawn();
         }
     }
 
