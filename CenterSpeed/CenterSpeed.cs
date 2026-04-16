@@ -21,7 +21,7 @@ using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace CenterSpeed;
 
-[PluginMetadata(Id = "centerspeed", Version = "1.0.0", Name = "CenterSpeed", Author = "Lethal & Retro", Description = "Center-screen particle speedometer HUD")]
+[PluginMetadata(Id = "centerspeed", Version = "1.0.0", Name = "CenterSpeed", Author = "Lethal & Retro, Ported by Low", Description = "Center-screen particle speedometer HUD")]
 public sealed class CenterSpeed : BasePlugin
 {
     // -------------------------------------------------------------------------
@@ -260,7 +260,8 @@ public sealed class CenterSpeed : BasePlugin
                 value  = Math.Clamp(value, -10f, 10f);
                 settings.DigitOffsets[index1 - 1] = value;
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player, immediate: true);
+                // Defer spawn to next world update so old entities are fully gone.
+                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
                 player.SendChat($" [HUD] Digit {index1} offset set to {value:F2}");
                 break;
             }
@@ -276,7 +277,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.HudScale = Math.Clamp(value, 0.0001f, 10f);
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player, immediate: true);
+                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
                 player.SendChat($" [HUD] Scale set to {settings.HudScale:F6}");
                 break;
             }
@@ -292,7 +293,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.YOffset = Math.Clamp(offset, -10f, 10f);
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player, immediate: true);
+                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
                 player.SendChat($" [HUD] Y-Offset set to {settings.YOffset:F2}");
                 break;
             }
@@ -303,9 +304,9 @@ public sealed class CenterSpeed : BasePlugin
                 SaveSettings(player.SteamID, settings);
 
                 if (settings.Enabled)
-                    SpawnPlayerHud(player, immediate: true);
+                    Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
                 else
-                    KillPlayerHud(id, immediate: true);
+                    KillPlayerHud(id);
 
                 player.SendChat($" [HUD] Enabled: {settings.Enabled}");
                 break;
@@ -320,7 +321,7 @@ public sealed class CenterSpeed : BasePlugin
     // -------------------------------------------------------------------------
     // HUD management
 
-    private void SpawnPlayerHud(IPlayer player, bool immediate = false)
+    private void SpawnPlayerHud(IPlayer player)
     {
         if (!player.IsValid || player.IsFakeClient) return;
 
@@ -336,7 +337,7 @@ public sealed class CenterSpeed : BasePlugin
             return;
         }
 
-        KillPlayerHud(id, immediate);
+        KillPlayerHud(id);
 
         var settings = _playerSettings[id] ??= new PlayerHudSettings();
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
@@ -413,7 +414,7 @@ public sealed class CenterSpeed : BasePlugin
             Array.FindAll(state.Digits, d => d != null).Length);
     }
 
-    private void KillPlayerHud(int slot, bool immediate = false)
+    private void KillPlayerHud(int slot)
     {
         var state = _huds[slot];
         if (state == null) return;
@@ -433,25 +434,17 @@ public sealed class CenterSpeed : BasePlugin
                 particle.SetTransmitState(false, p.PlayerID);
             }
 
-            particle.AcceptInput<string>("Stop", null);
-            particle.AcceptInput<string>("DestroyImmediately", null);
             particle.Active = false;
             particle.ActiveUpdated();
+            particle.AcceptInput<string>("Stop", null);
+            particle.AcceptInput<string>("DestroyImmediately", null);
 
-            if (immediate)
+            // Defer final Despawn to let the engine propagate the stop.
+            Core.Scheduler.DelayBySeconds(0.1f, () =>
             {
                 if (particle.IsValidEntity)
                     particle.Despawn();
-            }
-            else
-            {
-                // Defer Despawn to let the engine propagate the stop.
-                Core.Scheduler.DelayBySeconds(0.1f, () =>
-                {
-                    if (particle.IsValidEntity)
-                        particle.Despawn();
-                });
-            }
+            });
         }
     }
 
