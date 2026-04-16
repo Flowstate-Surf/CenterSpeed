@@ -31,7 +31,6 @@ public sealed class CenterSpeed : BasePlugin
     private readonly PlayerHudSettings?[] _playerSettings = new PlayerHudSettings?[65];
     private readonly float[]              _lastSpeed      = new float[65];
 
-    private CBaseEntity?     _sharedTarget;
     private IConVar<string>? _particleConVar;
     private int              _tickCounter;
     private int              _transmitLogCounter;
@@ -82,11 +81,6 @@ public sealed class CenterSpeed : BasePlugin
     {
         for (var i = 0; i < 65; i++)
             KillPlayerHud(i);
-
-        if (_sharedTarget?.IsValidEntity == true)
-            _sharedTarget.AcceptInput<string>("DestroyImmediately", null);
-
-        _sharedTarget = null;
     }
 
     // -------------------------------------------------------------------------
@@ -129,8 +123,6 @@ public sealed class CenterSpeed : BasePlugin
         // Drop entity references — the engine has already cleaned them up.
         for (var i = 0; i < 65; i++)
             _huds[i] = null;
-
-        _sharedTarget = null;
     }
 
     [EventListener<EventDelegates.OnTick>]
@@ -349,35 +341,12 @@ public sealed class CenterSpeed : BasePlugin
             return;
         }
 
-        // Create (or reuse) the one shared info_target that all particles reference.
-        if (_sharedTarget == null || !_sharedTarget.IsValidEntity)
-        {
-            var target = Core.EntitySystem.CreateEntityByDesignerName<CBaseEntity>("info_target");
-            if (target == null)
-            {
-                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] FAILED to create shared info_target");
-                return;
-            }
-
-            // CRITICAL: CP17's Y component is mapped to particle alpha (field 7).
-            // Origin Y must be >= 1 for the particle to be visible.
-            // The vpcf clamps CP17.Y from [0,1]->[0,1], so 0 = invisible, >=1 = fully opaque.
-            using var targetKv = new CEntityKeyValues();
-            targetKv.SetVector("origin", new Vector(0f, 32f, 0f));
-            target.DispatchSpawn(targetKv);
-
-            _sharedTarget = target;
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Created shared info_target index={Idx} AbsOrigin={Pos}",
-                target.Index, target.AbsOrigin);
-        }
-        else
-        {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Reusing existing info_target index={Idx} AbsOrigin={Pos}",
-                _sharedTarget.Index, _sharedTarget.AbsOrigin);
-        }
-
         var particleName = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Spawning 4 particles with effect={Name}", particleName);
+
+        // Spawn particle at the player's current position so it's near the player from the start.
+        var playerOrigin = (player.PlayerPawn?.IsValid == true ? player.PlayerPawn.AbsOrigin : null) ?? new Vector(0f, 0f, 0f);
+        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Player origin={Pos}", playerOrigin);
 
         var state = new PlayerHudState { OwnerSlot = id };
 
@@ -390,30 +359,17 @@ public sealed class CenterSpeed : BasePlugin
                 continue;
             }
 
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] created index={Idx}, calling DispatchSpawn with CEntityKeyValues", i, particle.Index);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] created index={Idx}", i, particle.Index);
 
-            // Pass effect_name and start_active via CEntityKeyValues, matching original ModSharp KV approach.
+            // Set effect_name, start_active, and origin at spawn time via CEntityKeyValues.
             using var kv = new CEntityKeyValues();
             kv.SetString("effect_name", particleName);
             kv.SetBool("start_active", false);
+            kv.SetVector("origin", playerOrigin);
             particle.DispatchSpawn(kv);
 
             Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] post-spawn: IsValid={IsValid} EffectName={Effect}",
                 i, particle.IsValidEntity, particle.EffectName);
-
-            // CP17 → shared info_target (particle anchor entity)
-            var cpEntCount = particle.ControlPointEnts.ElementCount;
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] ControlPointEnts.ElementCount={Count}", cpEntCount);
-            if (cpEntCount > 17)
-            {
-                particle.ControlPointEnts[17] = Core.EntitySystem.GetRefEHandle<CBaseEntity>(_sharedTarget);
-                particle.ControlPointEntsUpdated();
-                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Set CP17 to info_target ok");
-            }
-            else
-            {
-                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] WARNING: ControlPointEnts array too small ({Count}), cannot set index 17", cpEntCount);
-            }
 
             // DataCP 33 carries the per-digit horizontal + vertical offset.
             particle.DataCP      = 33;
@@ -421,18 +377,17 @@ public sealed class CenterSpeed : BasePlugin
             Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] DataCP=33 DataCPValue=({X},{Y},0)",
                 settings.DigitOffsets[i], settings.YOffset);
 
-            // Log initial ServerControlPointAssignments slots so we can see if defaults are 0 or 255.
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Initial CP slots: [{A0},{A1},{A2},{A3}]",
-                particle.ServerControlPointAssignments[0],
-                particle.ServerControlPointAssignments[1],
-                particle.ServerControlPointAssignments[2],
-                particle.ServerControlPointAssignments[3]);
-
-            // CP32 = digit frame index, CP34 = scale, CP16 = color (white).
+            // CP17.Y = 1.0 → alpha = 1.0 (visible)
+            // CP17.Z = 2.0 → self-illumination = 2.0 (bright)
+            // CP32.X = digit frame index
+            // CP34.X = sprite size (scale)
+            // CP16.XYZ = color 0-255 range
+            // NOTE: Only 4 server CP slots available — all used here.
+            bool r17 = SetControlPointValue(particle, 17, new Vector(0f, 1f, 2f));
             bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
             bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
             bool r16 = SetControlPointValue(particle, 16, new Vector(255f, 255f, 255f));
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP results: CP32={R32} CP34={R34} CP16={R16}", r32, r34, r16);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP: CP17={R17} CP32={R32} CP34={R34} CP16={R16}", r17, r32, r34, r16);
 
             particle.AcceptInput<string>("Start", null);
             particle.Active = true;
