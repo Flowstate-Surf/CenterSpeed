@@ -386,7 +386,9 @@ public sealed class CenterSpeed : BasePlugin
             settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
             ApplyHudSettings(player.PlayerID, settings);
-            Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
+            var m = BuildSizeMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 0);
             return ValueTask.CompletedTask;
         };
         builder.AddOption(upBtn);
@@ -397,7 +399,9 @@ public sealed class CenterSpeed : BasePlugin
             settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
             ApplyHudSettings(player.PlayerID, settings);
-            Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
+            var m = BuildSizeMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 1);
             return ValueTask.CompletedTask;
         };
         builder.AddOption(downBtn);
@@ -423,15 +427,19 @@ public sealed class CenterSpeed : BasePlugin
         builder.Design.SetMenuTitle($"Position  (x:{settings.DigitOffsets[1]:F2}  y:{settings.YOffset:F2})");
         builder.SetPlayerFrozen(false);
 
+        int optionIndex = 0;
         void AddMoveButton(string label, Action applyMove)
         {
+            int myIndex = optionIndex++;
             var btn = new ButtonMenuOption(label);
             btn.Click += (_, _2) =>
             {
                 applyMove();
                 SaveSettings(player.SteamID, settings);
                 ApplyHudSettings(player.PlayerID, settings);
-                Core.MenusAPI.OpenMenuForPlayer(player, BuildPositionMenu(player, settings));
+                var m = BuildPositionMenu(player, settings);
+                Core.MenusAPI.OpenMenuForPlayer(player, m);
+                m.MoveToOptionIndex(player, myIndex);
                 return ValueTask.CompletedTask;
             };
             builder.AddOption(btn);
