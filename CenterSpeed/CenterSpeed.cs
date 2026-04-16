@@ -248,8 +248,15 @@ public sealed class CenterSpeed : BasePlugin
 
         if (@event.UserIdPlayer is not { } player) return HookResult.Continue;
 
-        var id = player.PlayerID;
-        if (id >= 0 && id < 65)
+        var id   = player.PlayerID;
+        var team = @event.Team;
+
+        // Only kill when going to spectator/unassigned (team < 2).
+        // When joining a playing team, OnPlayerSpawn fires next and
+        // SpawnPlayerHud already calls KillPlayerHud at the top —
+        // killing here too would schedule a deferred Kill that fires
+        // after SpawnPlayerHud creates new particles and hits them instead.
+        if (id >= 0 && id < 65 && team < 2)
             KillPlayerHud(id);
 
         return HookResult.Continue;
@@ -693,11 +700,7 @@ public sealed class CenterSpeed : BasePlugin
         foreach (var particle in state.Digits)
         {
             if (particle == null || !particle.IsValidEntity) continue;
-
-            // AcceptInput("Kill") is synchronous — fires immediately on the current
-            // game tick, before SpawnPlayerHud can create new particles that might
-            // reuse the same entity slot and get caught by a deferred Kill event.
-            particle.AcceptInput<string>("Kill", null);
+            particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
         }
     }
 
@@ -877,7 +880,7 @@ public sealed class CenterSpeed : BasePlugin
         // JSON fallback
         try
         {
-            var path = Path.Combine(Core.PluginDataDirectory, SettingsFile);
+            var path = Path.Combine(Path.GetDirectoryName(GetConfigPath())!, SettingsFile);
             if (!File.Exists(path)) return;
 
             var dict = JsonSerializer.Deserialize<Dictionary<string, PlayerSettingsData>>(File.ReadAllText(path));
@@ -931,7 +934,7 @@ public sealed class CenterSpeed : BasePlugin
         // JSON fallback
         try
         {
-            var path = Path.Combine(Core.PluginDataDirectory, SettingsFile);
+            var path = Path.Combine(Path.GetDirectoryName(GetConfigPath())!, SettingsFile);
 
             Dictionary<string, PlayerSettingsData> dict;
             try
