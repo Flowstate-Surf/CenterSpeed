@@ -16,6 +16,7 @@ using SwiftlyS2.Shared.Misc;
 using SwiftlyS2.Shared.Natives;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Plugins;
+using SwiftlyS2.Shared.EntitySystem;
 using SwiftlyS2.Shared.SchemaDefinitions;
 
 namespace CenterSpeed;
@@ -33,6 +34,7 @@ public sealed class CenterSpeed : BasePlugin
     private CBaseEntity?     _sharedTarget;
     private IConVar<string>? _particleConVar;
     private int              _tickCounter;
+    private int              _transmitLogCounter;
 
     private static readonly Dictionary<int, int> _digitMap = new()
     {
@@ -73,6 +75,7 @@ public sealed class CenterSpeed : BasePlugin
             "Particle file for center-speed HUD",
             "particles/digits_x/digits_x.vpcf"
         );
+        Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
     }
 
     public override void Unload()
@@ -92,8 +95,18 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnPrecacheResource>]
     public void OnPrecacheResource(IOnPrecacheResourceEvent @event)
     {
+        // Always precache the configured particle — handles workshop-mounted assets too.
+        var particlePath = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
+        Core.Logger.LogWarning("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
+        @event.AddItem(particlePath);
+
+        // Also scan any locally bundled assets.
         var assetPath = Path.Combine(Core.PluginPath, "assets");
-        if (!Directory.Exists(assetPath)) return;
+        if (!Directory.Exists(assetPath))
+        {
+            Core.Logger.LogWarning("[CenterSpeed][Precache] No local assets folder found at: {Path} (using workshop/addon assets)", assetPath);
+            return;
+        }
 
         foreach (var file in Directory.EnumerateFiles(assetPath, "*", SearchOption.AllDirectories))
         {
@@ -105,6 +118,7 @@ public sealed class CenterSpeed : BasePlugin
                 ? relative[..^2]
                 : relative;
 
+            Core.Logger.LogWarning("[CenterSpeed][Precache] Local asset: {Asset}", asset);
             @event.AddItem(asset);
         }
     }
@@ -148,6 +162,9 @@ public sealed class CenterSpeed : BasePlugin
         LoadSettings(player.SteamID, settings);
         _playerSettings[id] = settings;
 
+        Core.Logger.LogWarning("[CenterSpeed][Connect] {Name} slot={Id} steam={Steam} HudEnabled={Enabled}",
+            player.Name, id, player.SteamID, settings.Enabled);
+
         return HookResult.Continue;
     }
 
@@ -174,6 +191,8 @@ public sealed class CenterSpeed : BasePlugin
         var id = player.PlayerID;
         if (id < 0 || id >= 65) return HookResult.Continue;
 
+        Core.Logger.LogWarning("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
+            id, player.Controller?.TeamNum);
         SpawnPlayerHud(player);
         return HookResult.Continue;
     }
@@ -310,12 +329,25 @@ public sealed class CenterSpeed : BasePlugin
         if (id < 0 || id >= 65) return;
 
         // Only spawn for players on playing teams (T=2, CT=3).
-        if (player.Controller?.TeamNum < 2) return;
+        var team = player.Controller?.TeamNum ?? 0;
+        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
+        if (team < 2)
+        {
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
+            return;
+        }
 
         KillPlayerHud(id);
 
         var settings = _playerSettings[id] ??= new PlayerHudSettings();
-        if (!settings.Enabled) return;
+        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
+            settings.Enabled, settings.HudScale, settings.YOffset);
+
+        if (!settings.Enabled)
+        {
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} — use !hudsettings toggle to enable", id);
+            return;
+        }
 
         // Create (or reuse) the one shared info_target that all particles reference.
         if (_sharedTarget == null || !_sharedTarget.IsValidEntity)
@@ -323,48 +355,93 @@ public sealed class CenterSpeed : BasePlugin
             var target = Core.EntitySystem.CreateEntityByDesignerName<CBaseEntity>("info_target");
             if (target == null)
             {
-                Core.Logger.LogWarning("[CenterSpeed] Failed to create shared info_target");
+                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] FAILED to create shared info_target");
                 return;
             }
-            target.DispatchSpawn();
+
+            // CRITICAL: CP17's Y component is mapped to particle alpha (field 7).
+            // Origin Y must be >= 1 for the particle to be visible.
+            // The vpcf clamps CP17.Y from [0,1]->[0,1], so 0 = invisible, >=1 = fully opaque.
+            using var targetKv = new CEntityKeyValues();
+            targetKv.SetVector("origin", new Vector(0f, 32f, 0f));
+            target.DispatchSpawn(targetKv);
+
             _sharedTarget = target;
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Created shared info_target index={Idx} AbsOrigin={Pos}",
+                target.Index, target.AbsOrigin);
+        }
+        else
+        {
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Reusing existing info_target index={Idx} AbsOrigin={Pos}",
+                _sharedTarget.Index, _sharedTarget.AbsOrigin);
         }
 
         var particleName = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
-        var state        = new PlayerHudState { OwnerSlot = id };
+        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Spawning 4 particles with effect={Name}", particleName);
+
+        var state = new PlayerHudState { OwnerSlot = id };
 
         for (var i = 0; i < 4; i++)
         {
             var particle = Core.EntitySystem.CreateEntityByDesignerName<CParticleSystem>("info_particle_system");
             if (particle == null)
             {
-                Core.Logger.LogWarning("[CenterSpeed] Failed to spawn particle digit {Index} for slot {Slot}", i, id);
+                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] FAILED to create info_particle_system for digit {Index}", i);
                 continue;
             }
 
-            particle.EffectName  = particleName;
-            particle.StartActive = false;
-            particle.DispatchSpawn();
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] created index={Idx}, calling DispatchSpawn with CEntityKeyValues", i, particle.Index);
+
+            // Pass effect_name and start_active via CEntityKeyValues, matching original ModSharp KV approach.
+            using var kv = new CEntityKeyValues();
+            kv.SetString("effect_name", particleName);
+            kv.SetBool("start_active", false);
+            particle.DispatchSpawn(kv);
+
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] post-spawn: IsValid={IsValid} EffectName={Effect}",
+                i, particle.IsValidEntity, particle.EffectName);
 
             // CP17 → shared info_target (particle anchor entity)
-            particle.ControlPointEnts[17] = Core.EntitySystem.GetRefEHandle<CBaseEntity>(_sharedTarget);
-            particle.ControlPointEntsUpdated();
+            var cpEntCount = particle.ControlPointEnts.ElementCount;
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] ControlPointEnts.ElementCount={Count}", cpEntCount);
+            if (cpEntCount > 17)
+            {
+                particle.ControlPointEnts[17] = Core.EntitySystem.GetRefEHandle<CBaseEntity>(_sharedTarget);
+                particle.ControlPointEntsUpdated();
+                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Set CP17 to info_target ok");
+            }
+            else
+            {
+                Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] WARNING: ControlPointEnts array too small ({Count}), cannot set index 17", cpEntCount);
+            }
 
-            // DataCP 33 carries the per-digit horizontal + vertical offset
+            // DataCP 33 carries the per-digit horizontal + vertical offset.
             particle.DataCP      = 33;
             particle.DataCPValue = new Vector(settings.DigitOffsets[i], settings.YOffset, 0f);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] DataCP=33 DataCPValue=({X},{Y},0)",
+                settings.DigitOffsets[i], settings.YOffset);
 
-            // CP32 = digit frame index, CP34 = scale, CP16 = color (white)
-            SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
-            SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
-            SetControlPointValue(particle, 16, new Vector(255f, 255f, 255f));
+            // Log initial ServerControlPointAssignments slots so we can see if defaults are 0 or 255.
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Initial CP slots: [{A0},{A1},{A2},{A3}]",
+                particle.ServerControlPointAssignments[0],
+                particle.ServerControlPointAssignments[1],
+                particle.ServerControlPointAssignments[2],
+                particle.ServerControlPointAssignments[3]);
+
+            // CP32 = digit frame index, CP34 = scale, CP16 = color (white).
+            bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
+            bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
+            bool r16 = SetControlPointValue(particle, 16, new Vector(255f, 255f, 255f));
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP results: CP32={R32} CP34={R34} CP16={R16}", r32, r34, r16);
 
             particle.AcceptInput<string>("Start", null);
             particle.Active = true;
             particle.ActiveUpdated();
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] started. Active={Active}", i, particle.Active);
 
-            // Hidden for everyone by default; per-tick will expose to the owner.
-            particle.SetTransmitState(false);
+            // Immediately make visible to the owner (per-player only, not global).
+            particle.SetTransmitState(true, id);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] SetTransmitState(true, ownerSlot={Id})", i, id);
 
             state.Digits[i] = particle;
         }
@@ -373,6 +450,8 @@ public sealed class CenterSpeed : BasePlugin
 
         // Apply initial transmit so the owner sees the HUD immediately.
         ApplyTransmit(id, state, settings);
+        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Done. Particles created={Count}",
+            Array.FindAll(state.Digits, d => d != null).Length);
     }
 
     private void KillPlayerHud(int slot)
@@ -465,12 +544,21 @@ public sealed class CenterSpeed : BasePlugin
     private void ApplyTransmit(int ownerSlot, PlayerHudState state, PlayerHudSettings settings)
     {
         bool shouldSeeOwner = settings.Enabled && !state.IsDisposed;
+        int playerCount = 0;
 
         foreach (var p in Core.PlayerManager.GetAllPlayers())
         {
             if (p == null || !p.IsValid) continue;
+            playerCount++;
 
             bool visible = shouldSeeOwner && p.PlayerID == ownerSlot;
+
+            // Log every transmit pass for the owner so we can confirm it fires.
+            if (p.PlayerID == ownerSlot)
+            {
+                Core.Logger.LogWarning("[CenterSpeed][Transmit] owner slot={Owner} visible={Vis} shouldSeeOwner={Should} tick={T}",
+                    ownerSlot, visible, shouldSeeOwner, _transmitLogCounter++);
+            }
 
             foreach (var particle in state.Digits)
             {
@@ -478,6 +566,10 @@ public sealed class CenterSpeed : BasePlugin
                 particle.SetTransmitState(visible, p.PlayerID);
             }
         }
+
+        // Warn if GetAllPlayers returned nobody — that means transmit was never set.
+        if (playerCount == 0)
+            Core.Logger.LogWarning("[CenterSpeed][Transmit] WARNING: GetAllPlayers() returned 0 players — transmit not applied for ownerSlot={Owner}", ownerSlot);
     }
 
     // -------------------------------------------------------------------------
@@ -497,8 +589,11 @@ public sealed class CenterSpeed : BasePlugin
     {
         for (var i = 0; i < 4; i++)
         {
-            if (particle.ServerControlPointAssignments[i] == cpIndex ||
-                particle.ServerControlPointAssignments[i] == 255)
+            var assignment = particle.ServerControlPointAssignments[i];
+            // 255 = unassigned sentinel in CS2 particle schema.
+            // Also accept 0 as free if the CP index we want isn't 0 — some runtime defaults fill with 0.
+            bool isFree = assignment == 255 || (assignment == 0 && cpIndex != 0);
+            if (assignment == cpIndex || isFree)
             {
                 particle.ServerControlPointAssignments[i] = (byte)cpIndex;
                 particle.ServerControlPoints[i]           = value;
@@ -508,7 +603,12 @@ public sealed class CenterSpeed : BasePlugin
             }
         }
 
-        Core.Logger.LogWarning("[CenterSpeed] No free server control-point slot for CP {CpIndex}", cpIndex);
+        Core.Logger.LogWarning("[CenterSpeed] No free server control-point slot for CP {CpIndex}. Current slots: [{A0},{A1},{A2},{A3}]",
+            cpIndex,
+            particle.ServerControlPointAssignments[0],
+            particle.ServerControlPointAssignments[1],
+            particle.ServerControlPointAssignments[2],
+            particle.ServerControlPointAssignments[3]);
         return false;
     }
 

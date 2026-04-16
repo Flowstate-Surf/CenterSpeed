@@ -11,5 +11,12 @@
     <ItemGroup>
         <PackageReference Include="SwiftlyS2.CS2" Version="*" ExcludeAssets="runtime" />
     </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="..\assets\**\*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
+        </Content>
+    </ItemGroup>
 </Project>
 
