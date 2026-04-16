@@ -678,14 +678,10 @@ public sealed class CenterSpeed : BasePlugin
         {
             if (particle == null || !particle.IsValidEntity) continue;
 
-            // Hide explicitly per-player for all current players.
-            foreach (var p in Core.PlayerManager.GetAllPlayers())
-            {
-                if (p == null || !p.IsValid) continue;
-                particle.SetTransmitState(false, p.PlayerID);
-            }
-
-            particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
+            // AcceptInput("Kill") is synchronous — fires immediately on the current
+            // game tick, before SpawnPlayerHud can create new particles that might
+            // reuse the same entity slot and get caught by a deferred Kill event.
+            particle.AcceptInput<string>("Kill", null);
         }
     }
 
