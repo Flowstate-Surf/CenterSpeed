@@ -221,6 +221,13 @@ public sealed class CenterSpeed : BasePlugin
     [Command("hudsettings")]
     public void OnHudSettingsCommand(ICommandContext context)
     {
+        // Debug: log every invocation so we can see what the engine passes.
+        Core.Logger.LogWarning("[CenterSpeed][Cmd] hudsettings fired. IsSentByPlayer={IsBP} Sender={S} Args.Length={L} Args=[{Args}]",
+            context.IsSentByPlayer,
+            (context.Sender as IPlayer)?.Name ?? "null",
+            context.Args.Length,
+            string.Join(", ", context.Args));
+
         if (context.Sender is not IPlayer player) return;
 
         var id = player.PlayerID;
@@ -263,14 +270,14 @@ public sealed class CenterSpeed : BasePlugin
                 if (context.Args.Length < 2 ||
                     !float.TryParse(context.Args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 {
-                    player.SendChat(" [HUD] Usage: !hudsettings scale <0-10>");
+                    player.SendChat(" [HUD] Usage: !hudsettings scale <value> (e.g. 0.001 to 1.0)");
                     return;
                 }
 
-                settings.HudScale = Math.Clamp(value, 0f, 10f);
+                settings.HudScale = Math.Clamp(value, 0.0001f, 10f);
                 SaveSettings(player.SteamID, settings);
                 SpawnPlayerHud(player);
-                player.SendChat($" [HUD] Scale set to {settings.HudScale:F2}");
+                player.SendChat($" [HUD] Scale set to {settings.HudScale:F6}");
                 break;
             }
 
