@@ -128,8 +128,8 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnTick>]
     public void OnTick()
     {
-        // Throttle updates to every 10 ticks (~6 Hz at 64 tick).
-        if (++_tickCounter % 10 != 0) return;
+        // Update every 4 ticks (~16 Hz at 64 tick).
+        if (++_tickCounter % 4 != 0) return;
 
         foreach (var player in Core.PlayerManager.GetAllPlayers())
         {
@@ -511,9 +511,6 @@ public sealed class CenterSpeed : BasePlugin
         }
 
         _lastSpeed[id] = speed;
-
-        // Keep transmit in sync every update cycle.
-        ApplyTransmit(id, state, settings);
     }
 
     private void ApplyTransmit(int ownerSlot, PlayerHudState state, PlayerHudSettings settings)
