@@ -580,13 +580,15 @@ public sealed class CenterSpeed : BasePlugin
         // Only spawn for players on playing teams (T=2, CT=3).
         var team = player.Controller?.TeamNum ?? 0;
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
+
+        // Always kill any existing HUD first, regardless of team.
+        KillPlayerHud(id);
+
         if (team < 2)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping � not on a playing team (team={Team})", team);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
             return;
         }
-
-        KillPlayerHud(id);
 
         var settings = _playerSettings[id] ??= new PlayerHudSettings();
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
