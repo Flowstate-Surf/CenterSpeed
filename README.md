@@ -30,11 +30,9 @@
    ```
    game/csgo/addons/swiftlys2/plugins/CenterSpeed/
    ```
-3. Copy the `assets/` folder contents to:
-   ```
    game/csgo/addons/swiftlys2/plugins/CenterSpeed/assets/
    ```
-4. Restart the server or hot-reload SwiftlyS2.
+3. Restart the server
 
 A config file is auto-generated on first load at:
 ```
