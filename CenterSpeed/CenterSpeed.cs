@@ -185,8 +185,7 @@ public sealed class CenterSpeed : BasePlugin
 
         Core.Logger.LogWarning("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
             id, player.Controller?.TeamNum);
-        // Defer by one world update so the engine has time to assign the player's team.
-        Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+        SpawnPlayerHud(player);
         return HookResult.Continue;
     }
 
@@ -261,8 +260,7 @@ public sealed class CenterSpeed : BasePlugin
                 value  = Math.Clamp(value, -10f, 10f);
                 settings.DigitOffsets[index1 - 1] = value;
                 SaveSettings(player.SteamID, settings);
-                // Defer spawn to next world update so old entities are fully gone.
-                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+                SpawnPlayerHud(player);
                 player.SendChat($" [HUD] Digit {index1} offset set to {value:F2}");
                 break;
             }
@@ -278,7 +276,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.HudScale = Math.Clamp(value, 0.0001f, 10f);
                 SaveSettings(player.SteamID, settings);
-                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+                SpawnPlayerHud(player);
                 player.SendChat($" [HUD] Scale set to {settings.HudScale:F6}");
                 break;
             }
@@ -294,7 +292,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.YOffset = Math.Clamp(offset, -10f, 10f);
                 SaveSettings(player.SteamID, settings);
-                Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+                SpawnPlayerHud(player);
                 player.SendChat($" [HUD] Y-Offset set to {settings.YOffset:F2}");
                 break;
             }
@@ -305,7 +303,7 @@ public sealed class CenterSpeed : BasePlugin
                 SaveSettings(player.SteamID, settings);
 
                 if (settings.Enabled)
-                    Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+                    SpawnPlayerHud(player);
                 else
                     KillPlayerHud(id);
 
@@ -332,7 +330,7 @@ public sealed class CenterSpeed : BasePlugin
         SaveSettings(player.SteamID, settings);
 
         if (settings.Enabled)
-            Core.Scheduler.NextWorldUpdate(() => { if (player.IsValid) SpawnPlayerHud(player); });
+            SpawnPlayerHud(player);
         else
             KillPlayerHud(id);
 
@@ -455,8 +453,6 @@ public sealed class CenterSpeed : BasePlugin
                 particle.SetTransmitState(false, p.PlayerID);
             }
 
-            particle.Active = false;
-            particle.ActiveUpdated();
             particle.AcceptInput<string>("Stop", null);
             particle.AcceptInput<string>("DestroyImmediately", null);
 
