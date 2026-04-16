@@ -48,7 +48,7 @@ public sealed class CenterSpeed : BasePlugin
     private sealed class PlayerHudSettings
     {
         public float[] DigitOffsets { get; set; } = { -1.4f, -0.45f, 0.45f, 1.4f };
-        public float   HudScale     { get; set; } = 0.04f;
+        public float   HudScale     { get; set; } = 0.004f;
         public float   YOffset      { get; set; } = -1f;
         public bool    Enabled      { get; set; } = false;
     }
