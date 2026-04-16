@@ -354,10 +354,15 @@ public sealed class CenterSpeed : BasePlugin
         {
             settings.Enabled = !settings.Enabled;
             SaveSettings(player.SteamID, settings);
-            if (settings.Enabled)
-                SpawnPlayerHud(player);
-            else
-                KillPlayerHud(player.PlayerID);
+            var id = player.PlayerID;
+            var enabled = settings.Enabled;
+            Core.Scheduler.DelayBySeconds(0f, () =>
+            {
+                if (enabled)
+                    SpawnPlayerHud(player);
+                else
+                    KillPlayerHud(id);
+            });
             OpenMainMenu(player, settings);
             return ValueTask.CompletedTask;
         };
@@ -385,7 +390,9 @@ public sealed class CenterSpeed : BasePlugin
         {
             settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
-            ApplyHudSettings(player.PlayerID, settings);
+            var id = player.PlayerID;
+            var snapScale = settings.HudScale;
+            Core.Scheduler.DelayBySeconds(0f, () => ApplyHudSettings(id, settings));
             var m = BuildSizeMenu(player, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, m);
             m.MoveToOptionIndex(player, 0);
@@ -398,7 +405,8 @@ public sealed class CenterSpeed : BasePlugin
         {
             settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
-            ApplyHudSettings(player.PlayerID, settings);
+            var id = player.PlayerID;
+            Core.Scheduler.DelayBySeconds(0f, () => ApplyHudSettings(id, settings));
             var m = BuildSizeMenu(player, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, m);
             m.MoveToOptionIndex(player, 1);
@@ -436,7 +444,8 @@ public sealed class CenterSpeed : BasePlugin
             {
                 applyMove();
                 SaveSettings(player.SteamID, settings);
-                ApplyHudSettings(player.PlayerID, settings);
+                var id = player.PlayerID;
+                Core.Scheduler.DelayBySeconds(0f, () => ApplyHudSettings(id, settings));
                 var m = BuildPositionMenu(player, settings);
                 Core.MenusAPI.OpenMenuForPlayer(player, m);
                 m.MoveToOptionIndex(player, myIndex);
