@@ -30,6 +30,7 @@
    ```
    game/csgo/addons/swiftlys2/plugins/CenterSpeed/
    ```
+   ```
    game/csgo/addons/swiftlys2/plugins/CenterSpeed/assets/
    ```
 3. Restart the server
