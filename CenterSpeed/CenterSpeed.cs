@@ -81,7 +81,7 @@ public sealed class CenterSpeed : BasePlugin
         }
         catch
         {
-            // Convar already exists on hot reload — _particleConVar stays null,
+            // Convar already exists on hot reload ï¿½ _particleConVar stays null,
             // all call sites fall back to the hardcoded default via ??.
         }
         Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
@@ -99,7 +99,7 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnPrecacheResource>]
     public void OnPrecacheResource(IOnPrecacheResourceEvent @event)
     {
-        // Always precache the configured particle — handles workshop-mounted assets too.
+        // Always precache the configured particle ï¿½ handles workshop-mounted assets too.
         var particlePath = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
         Core.Logger.LogWarning("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
         @event.AddItem(particlePath);
@@ -130,7 +130,7 @@ public sealed class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnMapUnload>]
     public void OnMapUnload(IOnMapUnloadEvent @event)
     {
-        // Drop entity references — the engine has already cleaned them up.
+        // Drop entity references ï¿½ the engine has already cleaned them up.
         for (var i = 0; i < 65; i++)
             _huds[i] = null;
     }
@@ -385,7 +385,7 @@ public sealed class CenterSpeed : BasePlugin
         {
             settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
-            SpawnPlayerHud(player);
+            ApplyHudSettings(player.PlayerID, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
             return ValueTask.CompletedTask;
         };
@@ -396,7 +396,7 @@ public sealed class CenterSpeed : BasePlugin
         {
             settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, 0.001f, 0.5f);
             SaveSettings(player.SteamID, settings);
-            SpawnPlayerHud(player);
+            ApplyHudSettings(player.PlayerID, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, BuildSizeMenu(player, settings));
             return ValueTask.CompletedTask;
         };
@@ -430,7 +430,7 @@ public sealed class CenterSpeed : BasePlugin
             {
                 applyMove();
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player);
+                ApplyHudSettings(player.PlayerID, settings);
                 Core.MenusAPI.OpenMenuForPlayer(player, BuildPositionMenu(player, settings));
                 return ValueTask.CompletedTask;
             };
@@ -472,6 +472,31 @@ public sealed class CenterSpeed : BasePlugin
     // -------------------------------------------------------------------------
     // HUD management
 
+    /// <summary>
+    /// Updates scale (CP34) and position (CP33) on existing live particles without
+    /// destroying and recreating them. Used by menu adjustments to avoid ghost images.
+    /// Falls back to a full respawn if no live HUD exists yet.
+    /// </summary>
+    private void ApplyHudSettings(int id, PlayerHudSettings settings)
+    {
+        var state = _huds[id];
+        if (state == null || state.IsDisposed)
+        {
+            // No live HUD â€” nothing to update in-place.
+            return;
+        }
+
+        for (var i = 0; i < 4; i++)
+        {
+            var particle = state.Digits[i];
+            if (particle == null || !particle.IsValidEntity) continue;
+
+            // Update scale and position CPs in-place on the running particle.
+            SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
+            SetControlPointValue(particle, 33, new Vector(settings.DigitOffsets[i], settings.YOffset, 0f));
+        }
+    }
+
     private void SpawnPlayerHud(IPlayer player)
     {
         if (!player.IsValid || player.IsFakeClient) return;
@@ -484,7 +509,7 @@ public sealed class CenterSpeed : BasePlugin
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
         if (team < 2)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping ï¿½ not on a playing team (team={Team})", team);
             return;
         }
 
@@ -496,7 +521,7 @@ public sealed class CenterSpeed : BasePlugin
 
         if (!settings.Enabled)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} — use !hudsettings toggle to enable", id);
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} ï¿½ use !hudsettings toggle to enable", id);
             return;
         }
 
@@ -537,7 +562,7 @@ public sealed class CenterSpeed : BasePlugin
             //   Slot 1 = CP32: (frame, 0, 0) ? digit sprite frame
             //   Slot 2 = CP34: (scale, 0, 0) ? sprite size
             //   Slot 3 = CP33: (xOffset, yOffset, 0) ? screen position
-            // CP16 (color) is dropped — white is hardcoded in the particle.
+            // CP16 (color) is dropped ï¿½ white is hardcoded in the particle.
             bool r17 = SetControlPointValue(particle, 17, new Vector(0f, 1f, 2f));
             bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
             bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
@@ -671,9 +696,9 @@ public sealed class CenterSpeed : BasePlugin
             }
         }
 
-        // Warn if GetAllPlayers returned nobody — that means transmit was never set.
+        // Warn if GetAllPlayers returned nobody ï¿½ that means transmit was never set.
         if (playerCount == 0)
-            Core.Logger.LogWarning("[CenterSpeed][Transmit] WARNING: GetAllPlayers() returned 0 players — transmit not applied for ownerSlot={Owner}", ownerSlot);
+            Core.Logger.LogWarning("[CenterSpeed][Transmit] WARNING: GetAllPlayers() returned 0 players ï¿½ transmit not applied for ownerSlot={Owner}", ownerSlot);
     }
 
     // -------------------------------------------------------------------------
@@ -695,7 +720,7 @@ public sealed class CenterSpeed : BasePlugin
         {
             var assignment = particle.ServerControlPointAssignments[i];
             // 255 = unassigned sentinel in CS2 particle schema.
-            // Also accept 0 as free if the CP index we want isn't 0 — some runtime defaults fill with 0.
+            // Also accept 0 as free if the CP index we want isn't 0 ï¿½ some runtime defaults fill with 0.
             bool isFree = assignment == 255 || (assignment == 0 && cpIndex != 0);
             if (assignment == cpIndex || isFree)
             {
