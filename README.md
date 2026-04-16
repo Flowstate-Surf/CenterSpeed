@@ -18,6 +18,7 @@
 ## Requirements
 
 - [SwiftlyS2](https://github.com/swiftlys2/swiftlys2) v1.2.2+
+- [AddonsManager](https://github.com/SwiftlyS2-Plugins/AddonsManager/releases/tag/v2.0.1) v2.0.1+ — required for workshop particle asset delivery
 - *(Optional)* [Cookies](https://github.com/swiftlys2/cookies) plugin for database-backed settings
 
 ---
