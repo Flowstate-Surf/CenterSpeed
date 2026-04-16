@@ -24,7 +24,7 @@ using SwiftlyS2.Core.Menus.OptionsBase;
 
 namespace CenterSpeed;
 
-[PluginMetadata(Id = "centerspeed", Version = "1.0.0", Name = "CenterSpeed", Author = "Lethal & Retro, Ported by Low", Description = "Center-screen particle speedometer HUD")]
+[PluginMetadata(Id = "centerspeed", Version = "1.0.1", Name = "CenterSpeed", Author = "Lethal & Retro, Ported by Low", Description = "Center-screen particle speedometer HUD")]
 public sealed class CenterSpeed : BasePlugin
 {
     // -------------------------------------------------------------------------
@@ -36,6 +36,7 @@ public sealed class CenterSpeed : BasePlugin
 
     private IConVar<string>?      _particleConVar;
     private IPlayerCookiesAPIv1?  _cookies;
+    private PluginConfig          _config          = new();
     private int                   _tickCounter;
     private int                   _transmitLogCounter;
 
@@ -57,6 +58,16 @@ public sealed class CenterSpeed : BasePlugin
         public bool    Enabled      { get; set; } = false;
     }
 
+    private sealed class PluginConfig
+    {
+        public string  ConfigVersion       { get; set; } = "1.0.1";
+        public float   DefaultScale        { get; set; } = 0.04f;
+        public float   DefaultYOffset      { get; set; } = -1f;
+        public float[] DefaultDigitOffsets { get; set; } = { -1.5f, -0.5f, 0.5f, 1.5f };
+        public bool    EnableDatabase      { get; set; } = true;
+        public bool    Debug               { get; set; } = false;
+    }
+
     private sealed class PlayerHudState
     {
         public CParticleSystem?[] Digits     { get; } = new CParticleSystem?[4];
@@ -73,6 +84,7 @@ public sealed class CenterSpeed : BasePlugin
 
     public override void Load(bool hotReload)
     {
+        LoadConfig();
         try
         {
             _particleConVar = Core.ConVar.Create<string>(
@@ -86,10 +98,15 @@ public sealed class CenterSpeed : BasePlugin
             // Convar already exists on hot reload � _particleConVar stays null,
             // all call sites fall back to the hardcoded default via ??.
         }
-        Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
+        LogDebug("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
     }
     public override void UseSharedInterface(IInterfaceManager interfaceManager)
     {
+        if (!_config.EnableDatabase)
+        {
+            Core.Logger.LogWarning("[CenterSpeed] Database disabled in config — using local JSON for settings.");
+            return;
+        }
         if (interfaceManager.TryGetSharedInterface<IPlayerCookiesAPIv1>("Cookies.Player.v1", out var cookies))
         {
             _cookies = cookies;
@@ -114,14 +131,14 @@ public sealed class CenterSpeed : BasePlugin
     {
         // Always precache the configured particle � handles workshop-mounted assets too.
         var particlePath = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
-        Core.Logger.LogWarning("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
+        LogDebug("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
         @event.AddItem(particlePath);
 
         // Also scan any locally bundled assets.
         var assetPath = Path.Combine(Core.PluginPath, "assets");
         if (!Directory.Exists(assetPath))
         {
-            Core.Logger.LogWarning("[CenterSpeed][Precache] No local assets folder found at: {Path} (using workshop/addon assets)", assetPath);
+            LogDebug("[CenterSpeed][Precache] No local assets folder found at: {Path} (using workshop/addon assets)", assetPath);
             return;
         }
 
@@ -135,7 +152,7 @@ public sealed class CenterSpeed : BasePlugin
                 ? relative[..^2]
                 : relative;
 
-            Core.Logger.LogWarning("[CenterSpeed][Precache] Local asset: {Asset}", asset);
+            LogDebug("[CenterSpeed][Precache] Local asset: {Asset}", asset);
             @event.AddItem(asset);
         }
     }
@@ -173,11 +190,11 @@ public sealed class CenterSpeed : BasePlugin
         var id = player.PlayerID;
         if (id < 0 || id >= 65) return HookResult.Continue;
 
-        var settings = new PlayerHudSettings();
+        var settings = NewDefaultSettings();
         LoadSettings(player.SteamID, settings);
         _playerSettings[id] = settings;
 
-        Core.Logger.LogWarning("[CenterSpeed][Connect] {Name} slot={Id} steam={Steam} HudEnabled={Enabled}",
+        LogDebug("[CenterSpeed][Connect] {Name} slot={Id} steam={Steam} HudEnabled={Enabled}",
             player.Name, id, player.SteamID, settings.Enabled);
 
         return HookResult.Continue;
@@ -206,7 +223,7 @@ public sealed class CenterSpeed : BasePlugin
         var id = player.PlayerID;
         if (id < 0 || id >= 65) return HookResult.Continue;
 
-        Core.Logger.LogWarning("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
+        LogDebug("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
             id, player.Controller?.TeamNum);
         SpawnPlayerHud(player);
         return HookResult.Continue;
@@ -245,7 +262,7 @@ public sealed class CenterSpeed : BasePlugin
     public void OnHudSettingsCommand(ICommandContext context)
     {
         // Debug: log every invocation so we can see what the engine passes.
-        Core.Logger.LogWarning("[CenterSpeed][Cmd] hudsettings fired. IsSentByPlayer={IsBP} Sender={S} Args.Length={L} Args=[{Args}]",
+        LogDebug("[CenterSpeed][Cmd] hudsettings fired. IsSentByPlayer={IsBP} Sender={S} Args.Length={L} Args=[{Args}]",
             context.IsSentByPlayer,
             (context.Sender as IPlayer)?.Name ?? "null",
             context.Args.Length,
@@ -256,7 +273,7 @@ public sealed class CenterSpeed : BasePlugin
         var id = player.PlayerID;
         if (id < 0 || id >= 65) return;
 
-        var settings = _playerSettings[id] ??= new PlayerHudSettings();
+        var settings = _playerSettings[id] ??= NewDefaultSettings();
 
         if (context.Args.Length == 0 ||
             context.Args[0].Equals("info", StringComparison.OrdinalIgnoreCase))
@@ -458,7 +475,6 @@ public sealed class CenterSpeed : BasePlugin
     private IMenuAPI BuildPositionMenu(IPlayer player, PlayerHudSettings settings)
     {
         const float MoveStep = 0.2f;
-        const float DefaultY = -1f;
 
         float cx = (settings.DigitOffsets[1] + settings.DigitOffsets[2]) / 2f;
 
@@ -515,11 +531,11 @@ public sealed class CenterSpeed : BasePlugin
         var centerBtn = new ButtonMenuOption("\x0C»  Reset to Center");
         centerBtn.Click += (_, _2) =>
         {
-            settings.DigitOffsets[0] = -1.5f;
-            settings.DigitOffsets[1] = -0.5f;
-            settings.DigitOffsets[2] =  0.5f;
-            settings.DigitOffsets[3] =  1.5f;
-            settings.YOffset = DefaultY;
+            settings.DigitOffsets[0] = _config.DefaultDigitOffsets[0];
+            settings.DigitOffsets[1] = _config.DefaultDigitOffsets[1];
+            settings.DigitOffsets[2] = _config.DefaultDigitOffsets[2];
+            settings.DigitOffsets[3] = _config.DefaultDigitOffsets[3];
+            settings.YOffset = _config.DefaultYOffset;
             SaveSettings(player.SteamID, settings);
             var id = player.PlayerID;
             Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
@@ -579,33 +595,33 @@ public sealed class CenterSpeed : BasePlugin
 
         // Only spawn for players on playing teams (T=2, CT=3).
         var team = player.Controller?.TeamNum ?? 0;
-        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
+        LogDebug("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
 
         // Always kill any existing HUD first, regardless of team.
         KillPlayerHud(id);
 
         if (team < 2)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
+            LogDebug("[CenterSpeed][SpawnHUD] Skipping — not on a playing team (team={Team})", team);
             return;
         }
 
-        var settings = _playerSettings[id] ??= new PlayerHudSettings();
-        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
+        var settings = _playerSettings[id] ??= NewDefaultSettings();
+        LogDebug("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
             settings.Enabled, settings.HudScale, settings.YOffset);
 
         if (!settings.Enabled)
         {
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} � use !hudsettings toggle to enable", id);
+            LogDebug("[CenterSpeed][SpawnHUD] HUD disabled for slot={Id} � use !hudsettings toggle to enable", id);
             return;
         }
 
         var particleName = _particleConVar?.Value ?? "particles/digits_x/digits_x.vpcf";
-        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Spawning 4 particles with effect={Name}", particleName);
+        LogDebug("[CenterSpeed][SpawnHUD] Spawning 4 particles with effect={Name}", particleName);
 
         // Spawn particle at the player's current position so it's near the player from the start.
         var playerOrigin = (player.PlayerPawn?.IsValid == true ? player.PlayerPawn.AbsOrigin : null) ?? new Vector(0f, 0f, 0f);
-        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Player origin={Pos}", playerOrigin);
+        LogDebug("[CenterSpeed][SpawnHUD] Player origin={Pos}", playerOrigin);
 
         var state = new PlayerHudState { OwnerSlot = id };
 
@@ -618,7 +634,7 @@ public sealed class CenterSpeed : BasePlugin
                 continue;
             }
 
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] created index={Idx}", i, particle.Index);
+            LogDebug("[CenterSpeed][SpawnHUD] Particle[{I}] created index={Idx}", i, particle.Index);
 
             // Set effect_name, start_active, and origin at spawn time via CEntityKeyValues.
             using var kv = new CEntityKeyValues();
@@ -627,7 +643,7 @@ public sealed class CenterSpeed : BasePlugin
             kv.SetVector("origin", playerOrigin);
             particle.DispatchSpawn(kv);
 
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] post-spawn: IsValid={IsValid} EffectName={Effect}",
+            LogDebug("[CenterSpeed][SpawnHUD] Particle[{I}] post-spawn: IsValid={IsValid} EffectName={Effect}",
                 i, particle.IsValidEntity, particle.EffectName);
 
             // DataCP/DataCPValue does NOT reliably propagate to the client particle system.
@@ -642,17 +658,17 @@ public sealed class CenterSpeed : BasePlugin
             bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
             bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
             bool r33 = SetControlPointValue(particle, 33, new Vector(settings.DigitOffsets[i], settings.YOffset, 0f));
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP: CP17={R17} CP32={R32} CP34={R34} CP33={R33} offset=({X},{Y})",
+            LogDebug("[CenterSpeed][SpawnHUD] SetCP: CP17={R17} CP32={R32} CP34={R34} CP33={R33} offset=({X},{Y})",
                 r17, r32, r34, r33, settings.DigitOffsets[i], settings.YOffset);
 
             particle.AcceptInput<string>("Start", null);
             particle.Active = true;
             particle.ActiveUpdated();
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] started. Active={Active}", i, particle.Active);
+            LogDebug("[CenterSpeed][SpawnHUD] Particle[{I}] started. Active={Active}", i, particle.Active);
 
             // Immediately make visible to the owner (per-player only, not global).
             particle.SetTransmitState(true, id);
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] SetTransmitState(true, ownerSlot={Id})", i, id);
+            LogDebug("[CenterSpeed][SpawnHUD] Particle[{I}] SetTransmitState(true, ownerSlot={Id})", i, id);
 
             state.Digits[i] = particle;
         }
@@ -661,7 +677,7 @@ public sealed class CenterSpeed : BasePlugin
 
         // Apply initial transmit so the owner sees the HUD immediately.
         ApplyTransmit(id, state, settings);
-        Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Done. Particles created={Count}",
+        LogDebug("[CenterSpeed][SpawnHUD] Done. Particles created={Count}",
             Array.FindAll(state.Digits, d => d != null).Length);
     }
 
@@ -748,7 +764,7 @@ public sealed class CenterSpeed : BasePlugin
             // Log every transmit pass for the owner so we can confirm it fires.
             if (p.PlayerID == ownerSlot)
             {
-                Core.Logger.LogWarning("[CenterSpeed][Transmit] owner slot={Owner} visible={Vis} shouldSeeOwner={Should} tick={T}",
+                LogDebug("[CenterSpeed][Transmit] owner slot={Owner} visible={Vis} shouldSeeOwner={Should} tick={T}",
                     ownerSlot, visible, shouldSeeOwner, _transmitLogCounter++);
             }
 
@@ -773,6 +789,20 @@ public sealed class CenterSpeed : BasePlugin
         player.SendChat($" [HUD] Offsets: 1={o[0]:F2}  2={o[1]:F2}  3={o[2]:F2}  4={o[3]:F2}");
         player.SendChat($" [HUD] Scale: {settings.HudScale:F4}  Y-Offset: {settings.YOffset:F4}  Enabled: {settings.Enabled}");
     }
+
+    private void LogDebug(string template, params object?[] args)
+    {
+        if (_config.Debug)
+            Core.Logger.LogWarning(template, args);
+    }
+
+    private PlayerHudSettings NewDefaultSettings() => new()
+    {
+        HudScale     = _config.DefaultScale,
+        YOffset      = _config.DefaultYOffset,
+        DigitOffsets = (float[])_config.DefaultDigitOffsets.Clone(),
+        Enabled      = false,
+    };
 
     /// <summary>
     /// Writes cpIndex+value into the first available server-CP slot (slot 255 = unassigned).
@@ -926,5 +956,79 @@ public sealed class CenterSpeed : BasePlugin
             Core.Logger.LogWarning("[CenterSpeed] Failed to save settings for {SteamId}: {Msg}", steamId, ex.Message);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Config
+
+    private string GetConfigPath() =>
+        Path.Combine(
+            Path.GetFullPath(Path.Combine(Core.PluginPath, "..", "..")),
+            "configs", "plugins", "CenterSpeed", "config.jsonc");
+
+    private void LoadConfig()
+    {
+        var configPath = GetConfigPath();
+        var configDir  = Path.GetDirectoryName(configPath)!;
+
+        if (!File.Exists(configPath))
+        {
+            Directory.CreateDirectory(configDir);
+            File.WriteAllText(configPath, GenerateDefaultConfigText());
+            Core.Logger.LogWarning("[CenterSpeed] Default config created at: {Path}", configPath);
+            return;
+        }
+
+        try
+        {
+            var options = new JsonSerializerOptions
+            {
+                ReadCommentHandling     = JsonCommentHandling.Skip,
+                AllowTrailingCommas     = true,
+                PropertyNameCaseInsensitive = true,
+            };
+            var loaded = JsonSerializer.Deserialize<PluginConfig>(File.ReadAllText(configPath), options);
+            if (loaded != null)
+            {
+                _config = loaded;
+                if (_config.DefaultDigitOffsets?.Length != 4)
+                    _config.DefaultDigitOffsets = new[] { -1.5f, -0.5f, 0.5f, 1.5f };
+            }
+            Core.Logger.LogWarning("[CenterSpeed] Config loaded. Debug={Debug} EnableDatabase={DB}",
+                _config.Debug, _config.EnableDatabase);
+        }
+        catch (Exception ex)
+        {
+            Core.Logger.LogWarning("[CenterSpeed] Failed to load config, using defaults: {Msg}", ex.Message);
+        }
+    }
+
+    private static string GenerateDefaultConfigText() =>
+        """
+        {
+            // CenterSpeed Configuration
+            // Configuration schema version - do not modify.
+            "ConfigVersion": "1.0.1",
+
+            // Default HUD scale for new players (recommended: 0.001 to 0.500).
+            "DefaultScale": 0.04,
+
+            // Default vertical offset for new players.
+            // Negative values move the HUD upward, positive values downward.
+            "DefaultYOffset": -1.0,
+
+            // Default horizontal digit offsets for new players [D1, D2, D3, D4].
+            "DefaultDigitOffsets": [ -1.5, -0.5, 0.5, 1.5 ],
+
+            // Enable database storage for player settings.
+            // true  = use Cookies plugin (requires Cookies plugin to be installed)
+            // false = use local JSON file
+            "EnableDatabase": true,
+
+            // Enable verbose debug logging to the server console.
+            // false = silent (recommended for production servers)
+            // true  = verbose output for troubleshooting
+            "Debug": false
+        }
+        """;
 
 }
