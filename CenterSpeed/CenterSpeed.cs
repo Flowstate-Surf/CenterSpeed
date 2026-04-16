@@ -341,15 +341,16 @@ public sealed class CenterSpeed : BasePlugin
 
     // -------------------------------------------------------------------------
     // Menu builders
+    // Color codes work in OPTION TEXT only, not titles.
+    // \x01=white  \x04=green  \x0C=red
 
     private void OpenMainMenu(IPlayer player, PlayerHudSettings settings)
     {
         var builder = Core.MenusAPI.CreateBuilder();
-        builder.Design.SetMenuTitle("CenterSpeed HUD");
+        builder.Design.SetMenuTitle("[ CenterSpeed ]");
         builder.SetPlayerFrozen(false);
 
-        // ToggleMenuOption — ValueChanged is a synchronous void EventHandler<T>
-        var toggle = new ToggleMenuOption("Speedometer", settings.Enabled, "ON", "OFF");
+        var toggle = new ToggleMenuOption("\x01Speedometer", settings.Enabled, "\x04ON", "\x0COFF");
         toggle.ValueChanged += (_, args) =>
         {
             settings.Enabled = args.NewValue;
@@ -366,33 +367,71 @@ public sealed class CenterSpeed : BasePlugin
         };
         builder.AddOption(toggle);
 
-        // Size submenu
-        builder.AddOption(new SubmenuMenuOption("Size", () => BuildSizeMenu(player, settings)));
-
-        // Position submenu
-        builder.AddOption(new SubmenuMenuOption("Position", () => BuildPositionMenu(player, settings)));
+        builder.AddOption(new SubmenuMenuOption("\x04▶ \x01Size",     () => BuildSizeMenu(player, settings)));
+        builder.AddOption(new SubmenuMenuOption("\x04▶ \x01Position", () => BuildPositionMenu(player, settings)));
 
         Core.MenusAPI.OpenMenuForPlayer(player, builder.Build());
     }
 
     private IMenuAPI BuildSizeMenu(IPlayer player, PlayerHudSettings settings)
     {
+        const float ScaleStep = 0.002f;
+        const float ScaleMin  = 0.001f;
+        const float ScaleMax  = 0.500f;
+
+        // 14-slot block bar, green filled / white empty, value on the right
+        const int BarWidth = 14;
+        int filled = (int)Math.Round((settings.HudScale - ScaleMin) / (ScaleMax - ScaleMin) * BarWidth);
+        filled = Math.Clamp(filled, 0, BarWidth);
+        string bar = $"\x04{new string('█', filled)}\x01{new string('░', BarWidth - filled)}  \x040.{(int)(settings.HudScale * 10000):D4}";
+
         var builder = Core.MenusAPI.CreateBuilder();
-        builder.Design.SetMenuTitle("Size");
+        builder.Design.SetMenuTitle("[ Size ]");
         builder.SetPlayerFrozen(false);
 
-        // SliderMenuOption — ValueChanged is a synchronous void EventHandler<T>
-        var slider = new SliderMenuOption("Scale", 0.001f, 0.5f, settings.HudScale, 0.002f, 120, 1000, 1);
-        slider.ValueChanged += (_, args) =>
+        // index 0 — visual bar (clicking it just re-opens the menu)
+        var barBtn = new ButtonMenuOption(bar);
+        barBtn.Click += (_, _2) =>
         {
-            settings.HudScale = args.NewValue;
+            var m = BuildSizeMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 0);
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(barBtn);
+
+        // index 1
+        var upBtn = new ButtonMenuOption("\x04[+]  Scale Up");
+        upBtn.Click += (_, _2) =>
+        {
+            settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, ScaleMin, ScaleMax);
             SaveSettings(player.SteamID, settings);
             var id = player.PlayerID;
             Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
+            var m = BuildSizeMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 1);
+            return ValueTask.CompletedTask;
         };
-        builder.AddOption(slider);
+        builder.AddOption(upBtn);
 
-        var backBtn = new ButtonMenuOption("Back");
+        // index 2
+        var downBtn = new ButtonMenuOption("\x0C[-]  Scale Down");
+        downBtn.Click += (_, _2) =>
+        {
+            settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, ScaleMin, ScaleMax);
+            SaveSettings(player.SteamID, settings);
+            var id = player.PlayerID;
+            Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
+            var m = BuildSizeMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 2);
+            return ValueTask.CompletedTask;
+        };
+        builder.AddOption(downBtn);
+
+        // index 3
+        var backBtn = new ButtonMenuOption("\x01« Back");
         backBtn.Click += (_, _2) =>
         {
             OpenMainMenu(player, settings);
@@ -405,41 +444,62 @@ public sealed class CenterSpeed : BasePlugin
 
     private IMenuAPI BuildPositionMenu(IPlayer player, PlayerHudSettings settings)
     {
-        static float CentreX(float[] o) => (o[1] + o[2]) / 2f;
+        const float MoveStep = 0.2f;
         const float DefaultY = -1f;
 
+        float cx = (settings.DigitOffsets[1] + settings.DigitOffsets[2]) / 2f;
+
         var builder = Core.MenusAPI.CreateBuilder();
-        builder.Design.SetMenuTitle("Position");
+        builder.Design.SetMenuTitle("[ Position ]");
         builder.SetPlayerFrozen(false);
 
-        // X slider — moves all 4 digits left/right together
-        // SliderMenuOption — ValueChanged is a synchronous void EventHandler<T>
-        var xSlider = new SliderMenuOption("X (Left/Right)", -8f, 8f, CentreX(settings.DigitOffsets), 0.1f, 120, 1000, 1);
-        xSlider.ValueChanged += (_, args) =>
+        // index 0 — coordinate readout (non-interactive display)
+        var coordBtn = new ButtonMenuOption($"\x04X\x01: {cx:+0.00;-0.00;0.00}   \x04Y\x01: {settings.YOffset:+0.00;-0.00;0.00}");
+        coordBtn.Click += (_, _2) =>
         {
-            float cx = args.NewValue;
-            settings.DigitOffsets[0] = cx - 1.5f;
-            settings.DigitOffsets[1] = cx - 0.5f;
-            settings.DigitOffsets[2] = cx + 0.5f;
-            settings.DigitOffsets[3] = cx + 1.5f;
-            SaveSettings(player.SteamID, settings);
-            var id = player.PlayerID;
-            Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
+            var m = BuildPositionMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, 0);
+            return ValueTask.CompletedTask;
         };
-        builder.AddOption(xSlider);
+        builder.AddOption(coordBtn);
 
-        // Y slider — moves all 4 digits up/down
-        var ySlider = new SliderMenuOption("Y (Up/Down)", -8f, 8f, settings.YOffset, 0.1f, 120, 1000, 1);
-        ySlider.ValueChanged += (_, args) =>
+        int optionIndex = 1;
+        void AddMoveButton(string label, Action applyMove)
         {
-            settings.YOffset = args.NewValue;
-            SaveSettings(player.SteamID, settings);
-            var id = player.PlayerID;
-            Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
-        };
-        builder.AddOption(ySlider);
+            int myIndex = optionIndex++;
+            var btn = new ButtonMenuOption(label);
+            btn.Click += (_, _2) =>
+            {
+                applyMove();
+                SaveSettings(player.SteamID, settings);
+                var id = player.PlayerID;
+                Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
+                var m = BuildPositionMenu(player, settings);
+                Core.MenusAPI.OpenMenuForPlayer(player, m);
+                m.MoveToOptionIndex(player, myIndex);
+                return ValueTask.CompletedTask;
+            };
+            builder.AddOption(btn);
+        }
 
-        var centerBtn = new ButtonMenuOption("Reset to Center");
+        // indices 1-4
+        AddMoveButton("\x04◄  Left", () =>
+        {
+            for (var i = 0; i < 4; i++)
+                settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] - MoveStep, -10f, 10f);
+        });
+        AddMoveButton("\x04►  Right", () =>
+        {
+            for (var i = 0; i < 4; i++)
+                settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] + MoveStep, -10f, 10f);
+        });
+        AddMoveButton("\x04▲  Up",   () => settings.YOffset = Math.Clamp(settings.YOffset + MoveStep, -10f, 10f));
+        AddMoveButton("\x04▼  Down", () => settings.YOffset = Math.Clamp(settings.YOffset - MoveStep, -10f, 10f));
+
+        // index 5
+        int centerIndex = optionIndex++;
+        var centerBtn = new ButtonMenuOption("\x0C»  Reset to Center");
         centerBtn.Click += (_, _2) =>
         {
             settings.DigitOffsets[0] = -1.5f;
@@ -450,12 +510,15 @@ public sealed class CenterSpeed : BasePlugin
             SaveSettings(player.SteamID, settings);
             var id = player.PlayerID;
             Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
-            Core.MenusAPI.OpenMenuForPlayer(player, BuildPositionMenu(player, settings));
+            var m = BuildPositionMenu(player, settings);
+            Core.MenusAPI.OpenMenuForPlayer(player, m);
+            m.MoveToOptionIndex(player, centerIndex);
             return ValueTask.CompletedTask;
         };
         builder.AddOption(centerBtn);
 
-        var backBtn = new ButtonMenuOption("Back");
+        // index 6
+        var backBtn = new ButtonMenuOption("\x01« Back");
         backBtn.Click += (_, _2) =>
         {
             OpenMainMenu(player, settings);
@@ -607,15 +670,7 @@ public sealed class CenterSpeed : BasePlugin
                 particle.SetTransmitState(false, p.PlayerID);
             }
 
-            particle.AcceptInput<string>("Stop", null);
-            particle.AcceptInput<string>("DestroyImmediately", null);
-
-            // Defer final Despawn to let the engine propagate the stop.
-            Core.Scheduler.DelayBySeconds(0.1f, () =>
-            {
-                if (particle.IsValidEntity)
-                    particle.Despawn();
-            });
+            particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
         }
     }
 
