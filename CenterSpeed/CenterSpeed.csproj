@@ -10,6 +10,10 @@
 
     <ItemGroup>
         <PackageReference Include="SwiftlyS2.CS2" Version="*" ExcludeAssets="runtime" />
+        <Reference Include="Cookies.Contract">
+            <HintPath>lib\Cookies.Contract\Cookies.Contract\Cookies.Contract.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
     </ItemGroup>
 
     <ItemGroup>

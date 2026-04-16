@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Cookies.Contract;
 using SwiftlyS2.Core;
 using SwiftlyS2.Core.Extensions;
 using SwiftlyS2.Shared;
@@ -33,9 +34,10 @@ public sealed class CenterSpeed : BasePlugin
     private readonly PlayerHudSettings?[] _playerSettings = new PlayerHudSettings?[65];
     private readonly float[]              _lastSpeed      = new float[65];
 
-    private IConVar<string>? _particleConVar;
-    private int              _tickCounter;
-    private int              _transmitLogCounter;
+    private IConVar<string>?      _particleConVar;
+    private IPlayerCookiesAPIv1?  _cookies;
+    private int                   _tickCounter;
+    private int                   _transmitLogCounter;
 
     private static readonly Dictionary<int, int> _digitMap = new()
     {
@@ -86,7 +88,18 @@ public sealed class CenterSpeed : BasePlugin
         }
         Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
     }
-
+    public override void UseSharedInterface(IInterfaceManager interfaceManager)
+    {
+        if (interfaceManager.TryGetSharedInterface<IPlayerCookiesAPIv1>("Cookies.Player.v1", out var cookies))
+        {
+            _cookies = cookies;
+            Core.Logger.LogWarning("[CenterSpeed] Cookies.Player.v1 acquired — using Cookies for settings persistence.");
+        }
+        else
+        {
+            Core.Logger.LogWarning("[CenterSpeed] Cookies plugin not available — falling back to local JSON settings.");
+        }
+    }
     public override void Unload()
     {
         for (var i = 0; i < 65; i++)
@@ -794,12 +807,46 @@ public sealed class CenterSpeed : BasePlugin
     }
 
     // -------------------------------------------------------------------------
-    // JSON settings persistence (replaces ClientPreferences)
+    // -------------------------------------------------------------------------
+    // Settings persistence — Cookies plugin (primary) with JSON fallback
 
     private const string SettingsFile = "player_settings.json";
+    private const string CkScale    = "cs_scale";
+    private const string CkYOffset  = "cs_yoffset";
+    private const string CkEnabled  = "cs_enabled";
+    private const string CkOffset0  = "cs_offset0";
+    private const string CkOffset1  = "cs_offset1";
+    private const string CkOffset2  = "cs_offset2";
+    private const string CkOffset3  = "cs_offset3";
 
     private void LoadSettings(ulong steamId, PlayerHudSettings settings)
     {
+        if (_cookies != null)
+        {
+            // Cookies are already loaded into memory by the Cookies plugin on connect.
+            try
+            {
+                var dummy = Core.PlayerManager.GetAllPlayers()
+                    .FirstOrDefault(p => p.IsValid && p.SteamID == steamId);
+                if (dummy != null)
+                {
+                    settings.HudScale        = _cookies.GetOrDefault<float>(dummy, CkScale,   settings.HudScale);
+                    settings.YOffset         = _cookies.GetOrDefault<float>(dummy, CkYOffset, settings.YOffset);
+                    settings.Enabled         = _cookies.GetOrDefault<bool> (dummy, CkEnabled, settings.Enabled);
+                    settings.DigitOffsets[0] = _cookies.GetOrDefault<float>(dummy, CkOffset0, settings.DigitOffsets[0]);
+                    settings.DigitOffsets[1] = _cookies.GetOrDefault<float>(dummy, CkOffset1, settings.DigitOffsets[1]);
+                    settings.DigitOffsets[2] = _cookies.GetOrDefault<float>(dummy, CkOffset2, settings.DigitOffsets[2]);
+                    settings.DigitOffsets[3] = _cookies.GetOrDefault<float>(dummy, CkOffset3, settings.DigitOffsets[3]);
+                }
+            }
+            catch (Exception ex)
+            {
+                Core.Logger.LogWarning("[CenterSpeed] Cookies load error for {SteamId}: {Msg}", steamId, ex.Message);
+            }
+            return;
+        }
+
+        // JSON fallback
         try
         {
             var path = Path.Combine(Core.PluginDataDirectory, SettingsFile);
@@ -823,6 +870,37 @@ public sealed class CenterSpeed : BasePlugin
 
     private void SaveSettings(ulong steamId, PlayerHudSettings settings)
     {
+        if (_cookies != null)
+        {
+            try
+            {
+                var player = Core.PlayerManager.GetAllPlayers()
+                    .FirstOrDefault(p => p.IsValid && p.SteamID == steamId);
+                if (player != null)
+                {
+                    _cookies.Set<float>(player, CkScale,   settings.HudScale);
+                    _cookies.Set<float>(player, CkYOffset, settings.YOffset);
+                    _cookies.Set<bool> (player, CkEnabled, settings.Enabled);
+                    _cookies.Set<float>(player, CkOffset0, settings.DigitOffsets[0]);
+                    _cookies.Set<float>(player, CkOffset1, settings.DigitOffsets[1]);
+                    _cookies.Set<float>(player, CkOffset2, settings.DigitOffsets[2]);
+                    _cookies.Set<float>(player, CkOffset3, settings.DigitOffsets[3]);
+                    // Save is async — fire and forget
+                    Task.Run(async () =>
+                    {
+                        try   { await _cookies.Save(player); }
+                        catch (Exception ex) { Core.Logger.LogWarning("[CenterSpeed] Cookies save error: {Msg}", ex.Message); }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Core.Logger.LogWarning("[CenterSpeed] Cookies set error for {SteamId}: {Msg}", steamId, ex.Message);
+            }
+            return;
+        }
+
+        // JSON fallback
         try
         {
             var path = Path.Combine(Core.PluginDataDirectory, SettingsFile);
@@ -850,5 +928,5 @@ public sealed class CenterSpeed : BasePlugin
             Core.Logger.LogWarning("[CenterSpeed] Failed to save settings for {SteamId}: {Msg}", steamId, ex.Message);
         }
     }
-}
 
+}
