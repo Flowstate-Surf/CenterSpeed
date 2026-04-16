@@ -604,8 +604,9 @@ public sealed class CenterSpeed : BasePlugin
         var team = player.Controller?.TeamNum ?? 0;
         LogDebug("[CenterSpeed][SpawnHUD] Enter slot={Id} team={Team}", id, team);
 
-        // Always kill any existing HUD first, regardless of team.
-        KillPlayerHud(id);
+        // Always kill any existing HUD first — synchronous Despawn so the
+        // deferred Kill from KillPlayerHud can't fire on freshly spawned particles.
+        DespawnPlayerHud(id);
 
         if (team < 2)
         {
@@ -700,7 +701,34 @@ public sealed class CenterSpeed : BasePlugin
         foreach (var particle in state.Digits)
         {
             if (particle == null || !particle.IsValidEntity) continue;
+
+            // Hide from all players first, then schedule removal.
+            foreach (var p in Core.PlayerManager.GetAllPlayers())
+            {
+                if (p == null || !p.IsValid) continue;
+                particle.SetTransmitState(false, p.PlayerID);
+            }
             particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
+        }
+    }
+
+    /// <summary>
+    /// Synchronously removes particles via Despawn. Used by SpawnPlayerHud before
+    /// creating new particles so a deferred Kill can't fire on the new entity slots.
+    /// </summary>
+    private void DespawnPlayerHud(int slot)
+    {
+        var state = _huds[slot];
+        if (state == null) return;
+
+        state.IsDisposed = true;
+        _huds[slot]      = null;
+        _lastSpeed[slot] = 0;
+
+        foreach (var particle in state.Digits)
+        {
+            if (particle == null || !particle.IsValidEntity) continue;
+            particle.Despawn();
         }
     }
 
