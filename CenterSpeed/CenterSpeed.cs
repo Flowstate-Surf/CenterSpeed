@@ -47,8 +47,8 @@ public sealed class CenterSpeed : BasePlugin
 
     private sealed class PlayerHudSettings
     {
-        public float[] DigitOffsets { get; set; } = { -1.4f, -0.45f, 0.45f, 1.4f };
-        public float   HudScale     { get; set; } = 0.004f;
+        public float[] DigitOffsets { get; set; } = { -4.0f, -1.3f, 1.3f, 4.0f };
+        public float   HudScale     { get; set; } = 0.04f;
         public float   YOffset      { get; set; } = -1f;
         public bool    Enabled      { get; set; } = false;
     }
@@ -378,23 +378,20 @@ public sealed class CenterSpeed : BasePlugin
             Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Particle[{I}] post-spawn: IsValid={IsValid} EffectName={Effect}",
                 i, particle.IsValidEntity, particle.EffectName);
 
-            // DataCP 33 carries the per-digit horizontal + vertical offset.
-            particle.DataCP      = 33;
-            particle.DataCPValue = new Vector(settings.DigitOffsets[i], settings.YOffset, 0f);
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] DataCP=33 DataCPValue=({X},{Y},0)",
-                settings.DigitOffsets[i], settings.YOffset);
-
-            // CP17.Y = 1.0 → alpha = 1.0 (visible)
-            // CP17.Z = 2.0 → self-illumination = 2.0 (bright)
-            // CP32.X = digit frame index
-            // CP34.X = sprite size (scale)
-            // CP16.XYZ = color 0-255 range
-            // NOTE: Only 4 server CP slots available — all used here.
+            // DataCP/DataCPValue does NOT reliably propagate to the client particle system.
+            // CP33 (X/Y position offset) MUST be a ServerControlPoint.
+            // We have 4 server CP slots total:
+            //   Slot 0 = CP17: (0, 1, 2) → alpha=1, self-illum=2
+            //   Slot 1 = CP32: (frame, 0, 0) → digit sprite frame
+            //   Slot 2 = CP34: (scale, 0, 0) → sprite size
+            //   Slot 3 = CP33: (xOffset, yOffset, 0) → screen position
+            // CP16 (color) is dropped — white is hardcoded in the particle.
             bool r17 = SetControlPointValue(particle, 17, new Vector(0f, 1f, 2f));
             bool r32 = SetControlPointValue(particle, 32, new Vector(0f, 0f, 0f));
             bool r34 = SetControlPointValue(particle, 34, new Vector(settings.HudScale, 0f, 0f));
-            bool r16 = SetControlPointValue(particle, 16, new Vector(255f, 255f, 255f));
-            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP: CP17={R17} CP32={R32} CP34={R34} CP16={R16}", r17, r32, r34, r16);
+            bool r33 = SetControlPointValue(particle, 33, new Vector(settings.DigitOffsets[i], settings.YOffset, 0f));
+            Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] SetCP: CP17={R17} CP32={R32} CP34={R34} CP33={R33} offset=({X},{Y})",
+                r17, r32, r34, r33, settings.DigitOffsets[i], settings.YOffset);
 
             particle.AcceptInput<string>("Start", null);
             particle.Active = true;
@@ -429,7 +426,13 @@ public sealed class CenterSpeed : BasePlugin
         {
             if (particle == null || !particle.IsValidEntity) continue;
 
-            particle.SetTransmitState(false);
+            // Hide explicitly per-player for all current players.
+            foreach (var p in Core.PlayerManager.GetAllPlayers())
+            {
+                if (p == null || !p.IsValid) continue;
+                particle.SetTransmitState(false, p.PlayerID);
+            }
+
             particle.AcceptInput<string>("Stop", null);
             particle.AcceptInput<string>("DestroyImmediately", null);
             particle.Active = false;
@@ -485,16 +488,8 @@ public sealed class CenterSpeed : BasePlugin
             var particle = state.Digits[i];
             if (particle == null || !particle.IsValidEntity || state.IsDisposed) continue;
 
-            // Digit frame
+            // Update digit frame (CP32)
             SetControlPointValue(particle, 32, new Vector(_digitMap.GetValueOrDefault(digits[i], 1), 0f, 0f));
-
-            // Color: red = slowing, green = speeding, white = steady
-            if (_lastSpeed[id] > speed)
-                SetControlPointValue(particle, 16, new Vector(255f, 0f, 0f));
-            else if (_lastSpeed[id] < speed)
-                SetControlPointValue(particle, 16, new Vector(0f, 255f, 0f));
-            else
-                SetControlPointValue(particle, 16, new Vector(255f, 255f, 255f));
         }
 
         _lastSpeed[id] = speed;
