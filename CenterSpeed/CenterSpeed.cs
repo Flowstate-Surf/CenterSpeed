@@ -47,7 +47,7 @@ public sealed class CenterSpeed : BasePlugin
 
     private sealed class PlayerHudSettings
     {
-        public float[] DigitOffsets { get; set; } = { -4.0f, -1.3f, 1.3f, 4.0f };
+        public float[] DigitOffsets { get; set; } = { 1.0f, 2.0f, 3.0f, 4.0f };
         public float   HudScale     { get; set; } = 0.04f;
         public float   YOffset      { get; set; } = -1f;
         public bool    Enabled      { get; set; } = false;
@@ -260,7 +260,7 @@ public sealed class CenterSpeed : BasePlugin
                 value  = Math.Clamp(value, -10f, 10f);
                 settings.DigitOffsets[index1 - 1] = value;
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player);
+                SpawnPlayerHud(player, immediate: true);
                 player.SendChat($" [HUD] Digit {index1} offset set to {value:F2}");
                 break;
             }
@@ -276,7 +276,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.HudScale = Math.Clamp(value, 0.0001f, 10f);
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player);
+                SpawnPlayerHud(player, immediate: true);
                 player.SendChat($" [HUD] Scale set to {settings.HudScale:F6}");
                 break;
             }
@@ -292,7 +292,7 @@ public sealed class CenterSpeed : BasePlugin
 
                 settings.YOffset = Math.Clamp(offset, -10f, 10f);
                 SaveSettings(player.SteamID, settings);
-                SpawnPlayerHud(player);
+                SpawnPlayerHud(player, immediate: true);
                 player.SendChat($" [HUD] Y-Offset set to {settings.YOffset:F2}");
                 break;
             }
@@ -303,9 +303,9 @@ public sealed class CenterSpeed : BasePlugin
                 SaveSettings(player.SteamID, settings);
 
                 if (settings.Enabled)
-                    SpawnPlayerHud(player);
+                    SpawnPlayerHud(player, immediate: true);
                 else
-                    KillPlayerHud(id);
+                    KillPlayerHud(id, immediate: true);
 
                 player.SendChat($" [HUD] Enabled: {settings.Enabled}");
                 break;
@@ -320,7 +320,7 @@ public sealed class CenterSpeed : BasePlugin
     // -------------------------------------------------------------------------
     // HUD management
 
-    private void SpawnPlayerHud(IPlayer player)
+    private void SpawnPlayerHud(IPlayer player, bool immediate = false)
     {
         if (!player.IsValid || player.IsFakeClient) return;
 
@@ -336,7 +336,7 @@ public sealed class CenterSpeed : BasePlugin
             return;
         }
 
-        KillPlayerHud(id);
+        KillPlayerHud(id, immediate);
 
         var settings = _playerSettings[id] ??= new PlayerHudSettings();
         Core.Logger.LogWarning("[CenterSpeed][SpawnHUD] Settings: Enabled={Enabled} Scale={Scale} YOffset={Y}",
@@ -413,7 +413,7 @@ public sealed class CenterSpeed : BasePlugin
             Array.FindAll(state.Digits, d => d != null).Length);
     }
 
-    private void KillPlayerHud(int slot)
+    private void KillPlayerHud(int slot, bool immediate = false)
     {
         var state = _huds[slot];
         if (state == null) return;
@@ -438,12 +438,20 @@ public sealed class CenterSpeed : BasePlugin
             particle.Active = false;
             particle.ActiveUpdated();
 
-            // Defer final Despawn to let the engine propagate the stop.
-            Core.Scheduler.DelayBySeconds(0.1f, () =>
+            if (immediate)
             {
                 if (particle.IsValidEntity)
                     particle.Despawn();
-            });
+            }
+            else
+            {
+                // Defer Despawn to let the engine propagate the stop.
+                Core.Scheduler.DelayBySeconds(0.1f, () =>
+                {
+                    if (particle.IsValidEntity)
+                        particle.Despawn();
+                });
+            }
         }
     }
 
