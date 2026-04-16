@@ -69,11 +69,19 @@ public sealed class CenterSpeed : BasePlugin
 
     public override void Load(bool hotReload)
     {
-        _particleConVar = Core.ConVar.Create<string>(
-            "cs_speed_particle",
-            "Particle file for center-speed HUD",
-            "particles/digits_x/digits_x.vpcf"
-        );
+        try
+        {
+            _particleConVar = Core.ConVar.Create<string>(
+                "cs_speed_particle",
+                "Particle file for center-speed HUD",
+                "particles/digits_x/digits_x.vpcf"
+            );
+        }
+        catch
+        {
+            // Convar already exists on hot reload — _particleConVar stays null,
+            // all call sites fall back to the hardcoded default via ??.
+        }
         Core.Logger.LogWarning("[CenterSpeed] Plugin loaded. HotReload={HotReload} PluginPath={Path}", hotReload, Core.PluginPath);
     }
 
