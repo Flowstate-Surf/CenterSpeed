@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using SwiftlyS2.Shared.Players;
 using SwiftlyS2.Shared.Menus;
@@ -8,16 +8,13 @@ namespace CenterSpeed;
 
 public sealed partial class CenterSpeed
 {
-    // Color codes work in OPTION TEXT only, not titles.
-    // \x01=white  \x04=green  \x0C=red
-
     private void OpenMainMenu(IPlayer player, PlayerHudSettings settings)
     {
         var builder = Core.MenusAPI.CreateBuilder();
         builder.Design.SetMenuTitle("[ CenterSpeed ]");
         builder.SetPlayerFrozen(false);
 
-        var toggle = new ToggleMenuOption("\x01Speedometer", settings.Enabled, "\x04ON", "\x0COFF");
+        var toggle = new ToggleMenuOption("<font color='#FFD700'>Speedometer</font>", settings.Enabled, "<font color='#00FF00'>● ON</font>", "<font color='#FF4444'>● OFF</font>");
         toggle.ValueChanged += (_, args) =>
         {
             settings.Enabled = args.NewValue;
@@ -34,8 +31,8 @@ public sealed partial class CenterSpeed
         };
         builder.AddOption(toggle);
 
-        builder.AddOption(new SubmenuMenuOption("\x04▶ \x01Size",     () => BuildSizeMenu(player, settings)));
-        builder.AddOption(new SubmenuMenuOption("\x04▶ \x01Position", () => BuildPositionMenu(player, settings)));
+        builder.AddOption(new SubmenuMenuOption("<font color='#FFD700'>▶</font>  Size",     () => BuildSizeMenu(player, settings)));
+        builder.AddOption(new SubmenuMenuOption("<font color='#FFD700'>▶</font>  Position", () => BuildPositionMenu(player, settings)));
 
         Core.MenusAPI.OpenMenuForPlayer(player, builder.Build());
     }
@@ -46,29 +43,18 @@ public sealed partial class CenterSpeed
         const float ScaleMin  = 0.001f;
         const float ScaleMax  = 0.500f;
 
-        // 14-slot block bar, green filled / white empty, value on the right
+        // Title is the live progress bar: gold filled, grey empty, lime value
         const int BarWidth = 14;
         int filled = (int)Math.Round((settings.HudScale - ScaleMin) / (ScaleMax - ScaleMin) * BarWidth);
         filled = Math.Clamp(filled, 0, BarWidth);
-        string bar = $"\x04{new string('█', filled)}\x01{new string('░', BarWidth - filled)}  \x040.{(int)(settings.HudScale * 10000):D4}";
+        string title = $"<font color='#FFD700'>{new string('█', filled)}</font><font color='#888888'>{new string('░', BarWidth - filled)}</font>  <font color='#00FF00'>{settings.HudScale:F4}</font>";
 
         var builder = Core.MenusAPI.CreateBuilder();
-        builder.Design.SetMenuTitle("[ Size ]");
+        builder.Design.SetMenuTitle(title);
         builder.SetPlayerFrozen(false);
 
-        // index 0 — visual bar (clicking it just re-opens the menu)
-        var barBtn = new ButtonMenuOption(bar);
-        barBtn.Click += (_, _2) =>
-        {
-            var m = BuildSizeMenu(player, settings);
-            Core.MenusAPI.OpenMenuForPlayer(player, m);
-            m.MoveToOptionIndex(player, 0);
-            return ValueTask.CompletedTask;
-        };
-        builder.AddOption(barBtn);
-
-        // index 1
-        var upBtn = new ButtonMenuOption("\x04[+]  Scale Up");
+        // index 0 — Scale Up
+        var upBtn = new ButtonMenuOption("<font color='#00FF00'>[+]  Scale Up</font>");
         upBtn.Click += (_, _2) =>
         {
             settings.HudScale = Math.Clamp(settings.HudScale + ScaleStep, ScaleMin, ScaleMax);
@@ -77,13 +63,13 @@ public sealed partial class CenterSpeed
             Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
             var m = BuildSizeMenu(player, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, m);
-            m.MoveToOptionIndex(player, 1);
+            m.MoveToOptionIndex(player, 0);
             return ValueTask.CompletedTask;
         };
         builder.AddOption(upBtn);
 
-        // index 2
-        var downBtn = new ButtonMenuOption("\x0C[-]  Scale Down");
+        // index 1 — Scale Down
+        var downBtn = new ButtonMenuOption("<font color='#FF4444'>[-]  Scale Down</font>");
         downBtn.Click += (_, _2) =>
         {
             settings.HudScale = Math.Clamp(settings.HudScale - ScaleStep, ScaleMin, ScaleMax);
@@ -92,13 +78,13 @@ public sealed partial class CenterSpeed
             Core.Scheduler.NextTick(() => ApplyHudSettings(id, settings));
             var m = BuildSizeMenu(player, settings);
             Core.MenusAPI.OpenMenuForPlayer(player, m);
-            m.MoveToOptionIndex(player, 2);
+            m.MoveToOptionIndex(player, 1);
             return ValueTask.CompletedTask;
         };
         builder.AddOption(downBtn);
 
-        // index 3
-        var backBtn = new ButtonMenuOption("\x01« Back");
+        // index 2 — Back
+        var backBtn = new ButtonMenuOption("<font color='#888888'>« Back</font>");
         backBtn.Click += (_, _2) =>
         {
             OpenMainMenu(player, settings);
@@ -113,24 +99,15 @@ public sealed partial class CenterSpeed
     {
         const float MoveStep = 0.2f;
 
+        // Title shows live X/Y coordinates
         float cx = (settings.DigitOffsets[1] + settings.DigitOffsets[2]) / 2f;
+        string title = $"<font color='#FFD700'>X</font>: <font color='#ADD8E6'>{cx:+0.00;-0.00;0.00}</font>   <font color='#FFD700'>Y</font>: <font color='#ADD8E6'>{settings.YOffset:+0.00;-0.00;0.00}</font>";
 
         var builder = Core.MenusAPI.CreateBuilder();
-        builder.Design.SetMenuTitle("[ Position ]");
+        builder.Design.SetMenuTitle(title);
         builder.SetPlayerFrozen(false);
 
-        // index 0 — coordinate readout (non-interactive display)
-        var coordBtn = new ButtonMenuOption($"\x04X\x01: {cx:+0.00;-0.00;0.00}   \x04Y\x01: {settings.YOffset:+0.00;-0.00;0.00}");
-        coordBtn.Click += (_, _2) =>
-        {
-            var m = BuildPositionMenu(player, settings);
-            Core.MenusAPI.OpenMenuForPlayer(player, m);
-            m.MoveToOptionIndex(player, 0);
-            return ValueTask.CompletedTask;
-        };
-        builder.AddOption(coordBtn);
-
-        int optionIndex = 1;
+        int optionIndex = 0;
         void AddMoveButton(string label, Action applyMove)
         {
             int myIndex = optionIndex++;
@@ -149,23 +126,23 @@ public sealed partial class CenterSpeed
             builder.AddOption(btn);
         }
 
-        // indices 1-4
-        AddMoveButton("\x04◄  Left", () =>
+        // indices 0-3 — directional buttons
+        AddMoveButton("<font color='#ADD8E6'>◄  Left</font>", () =>
         {
             for (var i = 0; i < 4; i++)
                 settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] - MoveStep, -10f, 10f);
         });
-        AddMoveButton("\x04►  Right", () =>
+        AddMoveButton("<font color='#ADD8E6'>►  Right</font>", () =>
         {
             for (var i = 0; i < 4; i++)
                 settings.DigitOffsets[i] = Math.Clamp(settings.DigitOffsets[i] + MoveStep, -10f, 10f);
         });
-        AddMoveButton("\x04▲  Up",   () => settings.YOffset = Math.Clamp(settings.YOffset + MoveStep, -10f, 10f));
-        AddMoveButton("\x04▼  Down", () => settings.YOffset = Math.Clamp(settings.YOffset - MoveStep, -10f, 10f));
+        AddMoveButton("<font color='#ADD8E6'>▲  Up</font>",   () => settings.YOffset = Math.Clamp(settings.YOffset + MoveStep, -10f, 10f));
+        AddMoveButton("<font color='#ADD8E6'>▼  Down</font>", () => settings.YOffset = Math.Clamp(settings.YOffset - MoveStep, -10f, 10f));
 
-        // index 5
+        // index 4 — Reset to Center
         int centerIndex = optionIndex++;
-        var centerBtn = new ButtonMenuOption("\x0C»  Reset to Center");
+        var centerBtn = new ButtonMenuOption("<font color='#FFA500'>↺  Reset to Center</font>");
         centerBtn.Click += (_, _2) =>
         {
             settings.DigitOffsets[0] = _config.DefaultDigitOffsets[0];
@@ -183,8 +160,8 @@ public sealed partial class CenterSpeed
         };
         builder.AddOption(centerBtn);
 
-        // index 6
-        var backBtn = new ButtonMenuOption("\x01« Back");
+        // index 5 — Back
+        var backBtn = new ButtonMenuOption("<font color='#888888'>« Back</font>");
         backBtn.Click += (_, _2) =>
         {
             OpenMainMenu(player, settings);

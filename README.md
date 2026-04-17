@@ -99,4 +99,4 @@ CenterSpeed/
 
 - Lethal
 - Retro
-- Ported by Low
+- Ported to swiftlyS2 by Low

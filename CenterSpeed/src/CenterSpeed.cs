@@ -27,7 +27,7 @@ public sealed partial class CenterSpeed : BasePlugin
 
     private readonly PlayerHudState?[]    _huds           = new PlayerHudState?[65];
     private readonly PlayerHudSettings?[] _playerSettings = new PlayerHudSettings?[65];
-    private readonly float[]              _lastSpeed      = new float[65];
+    private readonly float[]              _lastSpeed   = new float[65];
 
     private IConVar<string>?      _particleConVar;
     private IPlayerCookiesAPIv1?  _cookies;
@@ -155,7 +155,7 @@ public sealed partial class CenterSpeed : BasePlugin
     [EventListener<EventDelegates.OnMapUnload>]
     public void OnMapUnload(IOnMapUnloadEvent @event)
     {
-        // Drop entity references � the engine has already cleaned them up.
+        // Drop entity references — the engine has already cleaned them up.
         for (var i = 0; i < 65; i++)
             _huds[i] = null;
     }
@@ -220,7 +220,14 @@ public sealed partial class CenterSpeed : BasePlugin
 
         LogDebug("[CenterSpeed][Spawn] EventPlayerSpawn fired for slot={Id} team={Team}",
             id, player.Controller?.TeamNum);
-        SpawnPlayerHud(player);
+
+        // Delay by one tick so that any OnPlayerTeam that fires in the same frame
+        // is processed before we create new particles.
+        Core.Scheduler.NextTick(() =>
+        {
+            if (player.IsValid && !player.IsFakeClient)
+                SpawnPlayerHud(player);
+        });
         return HookResult.Continue;
     }
 
@@ -244,8 +251,16 @@ public sealed partial class CenterSpeed : BasePlugin
         if (@event.UserIdPlayer is not { } player) return HookResult.Continue;
 
         var id = player.PlayerID;
+        if (id < 0 || id >= 65) return HookResult.Continue;
 
-        if (id >= 0 && id < 65)
+        var oldTeam = @event.OldTeam;
+        var newTeam = @event.Team;
+
+        LogDebug("[CenterSpeed][Team] slot={Id} oldTeam={Old} newTeam={New}", id, oldTeam, newTeam);
+
+        // Only kill the HUD when the player is leaving a playing team (going to spectator/unassigned).
+        // When joining a playing team, OnPlayerSpawn will handle spawning.
+        if (oldTeam >= 2 && newTeam < 2)
             KillPlayerHud(id);
 
         return HookResult.Continue;
@@ -387,13 +402,9 @@ public sealed partial class CenterSpeed : BasePlugin
         {
             if (particle == null || !particle.IsValidEntity) continue;
 
-            // Hide from all players first, then schedule removal.
-            foreach (var p in Core.PlayerManager.GetAllPlayers())
-            {
-                if (p == null || !p.IsValid) continue;
-                particle.SetTransmitState(false, p.PlayerID);
-            }
-            particle.AddEntityIOEvent<string>("Kill", null, null, null, 0f);
+            particle.AcceptInput<string>("Stop", null);
+            particle.AcceptInput<string>("DestroyImmediately", null);
+            particle.Active = false;
         }
     }
 
@@ -482,8 +493,9 @@ public sealed partial class CenterSpeed : BasePlugin
     private static void PrintHudSettings(IPlayer player, PlayerHudSettings settings)
     {
         var o = settings.DigitOffsets;
-        player.SendChat($" [HUD] Offsets: 1={o[0]:F2}  2={o[1]:F2}  3={o[2]:F2}  4={o[3]:F2}");
-        player.SendChat($" [HUD] Scale: {settings.HudScale:F4}  Y-Offset: {settings.YOffset:F4}  Enabled: {settings.Enabled}");
+        var stateText = settings.Enabled ? "[lime]ON[/]" : "[lightred]OFF[/]";
+        player.SendChat($"[gold][ HUD ][/] Offsets: [white]1={o[0]:F2}  2={o[1]:F2}  3={o[2]:F2}  4={o[3]:F2}[/]");
+        player.SendChat($"[gold][ HUD ][/] Scale: [lime]{settings.HudScale:F4}[/]  Y-Offset: [lime]{settings.YOffset:F4}[/]  Status: {stateText}");
     }
 
     private void LogDebug(string template, params object?[] args)
