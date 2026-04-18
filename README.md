@@ -31,10 +31,11 @@
    ```
    game/csgo/addons/swiftlys2/plugins/CenterSpeed/
    ```
+3. Add the WorkshopID to AddonManager (3708862153)
    ```
-   game/csgo/addons/swiftlys2/plugins/CenterSpeed/assets/
+   game/csgo/addons/swiftlys2/configs/plugins/AddonManager/config.jsonc
    ```
-3. Restart the server
+4. Restart the server
 
 A config file is auto-generated on first load at:
 ```
