@@ -21,6 +21,7 @@
 - [AddonsManager](https://github.com/SwiftlyS2-Plugins/AddonsManager/releases/tag/v2.0.1) v2.0.1+ — required for workshop particle asset delivery
 - *(Optional)* [Cookies](https://github.com/swiftlys2/cookies) plugin for database-backed settings
 - Create your own workshop addon
+- Public workshop ID 3708862153
 ---
 
 ## Installation
