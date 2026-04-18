@@ -83,11 +83,14 @@ game/csgo/addons/swiftlys2/configs/plugins/CenterSpeed/config.jsonc
 ```
 
 ├── Colors
-│   └── Flash Green/Red with loss/gain volocity
+│   └── Flash Green/Red with loss/gain velocity
+│   └── Select base color
 │   └── Add to hud menu
 ├── Font Change
 │   └── Add to hud menu
-
+│   └── Transparency 
+├── VIP
+│   └── VIP Permissioin set
 ```
 
 ---
