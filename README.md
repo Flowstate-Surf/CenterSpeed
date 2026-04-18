@@ -78,21 +78,16 @@ game/csgo/addons/swiftlys2/configs/plugins/CenterSpeed/config.jsonc
 
 ---
 
-## Project Structure
+## TODO
 
 ```
-CenterSpeed/
-├── CenterSpeed.csproj
-├── assets/                  # Particle and material assets
-│   ├── materials/digits_x/
-│   └── particles/digits_x/
-├── lib/                     # Local DLL references
-│   └── Cookies.Contract/
-└── src/                     # C# source files
-    ├── CenterSpeed.cs        # Plugin entry point, state, events, HUD core
-    ├── Commands.cs           # !cs and !hudsettings command handlers
-    ├── MenuManager.cs        # Interactive !cs menu (size, position, toggle)
-    └── CenterConfig.cs       # Config loading/saving and settings persistence
+
+├── Colors
+│   └── Flash Green/Red with loss/gain volocity
+│   └── Add to hud menu
+├── Font Change
+│   └── Add to hud menu
+
 ```
 
 ---
