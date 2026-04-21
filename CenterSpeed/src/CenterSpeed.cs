@@ -85,7 +85,7 @@ public sealed partial class CenterSpeed : BasePlugin
             _particleConVar = Core.ConVar.Create<string>(
                 "cs_speed_particle",
                 "Particle file for center-speed HUD",
-                "flowassets/particles/digits_x.vpcf"
+                "flowassets/particles/digits_x/digits_x.vpcf"
             );
         }
         catch
@@ -125,7 +125,7 @@ public sealed partial class CenterSpeed : BasePlugin
     public void OnPrecacheResource(IOnPrecacheResourceEvent @event)
     {
         // Always precache the configured particle � handles workshop-mounted assets too.
-        var particlePath = _particleConVar?.Value ?? "flowassets/particles/digits_x.vpcf";
+        var particlePath = _particleConVar?.Value ?? "flowassets/particles/digits_x/digits_x.vpcf";
         LogDebug("[CenterSpeed][Precache] Registering particle: {Path}", particlePath);
         @event.AddItem(particlePath);
 
@@ -324,7 +324,7 @@ public sealed partial class CenterSpeed : BasePlugin
             return;
         }
 
-        var particleName = _particleConVar?.Value ?? "flowassets/particles/digits_x.vpcf";
+        var particleName = _particleConVar?.Value ?? "flowassets/particles/digits_x/digits_x.vpcf";
         LogDebug("[CenterSpeed][SpawnHUD] Spawning 4 particles with effect={Name}", particleName);
 
         // Spawn particle at the player's current position so it's near the player from the start.
